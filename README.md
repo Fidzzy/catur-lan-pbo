@@ -1,6 +1,6 @@
 # LAN Chess Arena
 
-Game catur multiplayer via LAN — JavaFX GUI + TCP Socket murni (tanpa library networking eksternal) — plus mode single-player melawan **Stockfish** lewat protokol UCI. UI/UX mengikuti desain Figma kustom: dark gradient theme, panel kartu rounded, tombol pill, jam catur, dan panel riwayat langkah.
+Game catur multiplayer via LAN — JavaFX GUI + TCP Socket murni (tanpa library networking eksternal) — plus mode single-player melawan bot **Stockfish** lewat protokol UCI.
 
 ## Stack
 
@@ -9,7 +9,7 @@ Game catur multiplayer via LAN — JavaFX GUI + TCP Socket murni (tanpa library 
 - Maven (`javafx-maven-plugin` untuk development, `maven-shade-plugin` untuk fat JAR)
 - Networking: `java.net.Socket` + `ObjectOutputStream`/`ObjectInputStream`, port `5555`
 - Bot: proses eksternal **Stockfish** via `ProcessBuilder` + protokol UCI mentah (tanpa library JNI/wrapper)
-- Styling: JavaFX CSS (`theme.css`) — tidak ada framework UI eksternal
+- Styling: JavaFX CSS (`theme.css`) tidak ada framework UI eksternal
 
 ## Instalasi Stockfish (untuk mode vs Bot)
 
@@ -28,7 +28,7 @@ brew install stockfish
 
 Aplikasi otomatis mendeteksi lokasi binary umum (`/usr/games/stockfish`, `/usr/local/bin/stockfish`, `/opt/homebrew/bin/stockfish`, atau langsung dari PATH sistem) lewat `StockfishLocator.autoDetect()`. Kalau gagal terdeteksi, field path di layar setup bisa diisi manual.
 
-## Alur Layar (sesuai desain Figma)
+## Alur Layar
 
 ```
 MainMenuController (menu utama)
@@ -84,15 +84,15 @@ com.lanchess
 ├── client/
 │   ├── AppLauncher          -> main class fat JAR (TIDAK extends Application)
 │   ├── MainApp               -> main class 'mvn javafx:run', membuka MainMenuController
-│   ├── MainMenuController    -> menu utama (frame 1 Figma)
-│   ├── FriendModeController  -> pilih Host/Join (frame 2 Figma)
-│   ├── HostSetupController   -> setup Timer + warna sebelum host (frame 4 Figma)
-│   ├── BotSetupController    -> setup ELO + Timer + warna sebelum vs Bot (frame 3 Figma)
+│   ├── MainMenuController    -> menu utama 
+│   ├── FriendModeController  -> pilih Host/Join 
+│   ├── HostSetupController   -> setup Timer + warna sebelum host 
+│   ├── BotSetupController    -> setup ELO + Timer + warna sebelum vs Bot 
 │   ├── GameController        -> mode LAN: klik board <-> NetworkClient, clock interpolasi, history
 │   ├── BotGameController     -> mode vs Bot: klik board <-> StockfishEngine, clock lokal otoritatif
 │   ├── BoardView             -> Canvas render papan 8x8 (grid minimalis, bukan checkerboard coklat)
 │   ├── ClockPanel            -> komponen visual jam catur (mm:ss, 2 warna)
-│   ├── MoveHistoryPanel      -> panel riwayat langkah (kotak kanan-atas, frame 5 Figma)
+│   ├── MoveHistoryPanel      -> panel riwayat langkah 
 │   ├── PlayerColorChoice     -> widget 3 lingkaran pilih warna (Putih/Acak/Hitam)
 │   ├── MoveNotationFormatter -> format Move -> notasi aljabar ringkas untuk history panel
 │   ├── Theme                 -> loader stylesheet theme.css
