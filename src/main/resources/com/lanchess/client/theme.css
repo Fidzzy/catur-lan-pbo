@@ -1,0 +1,174 @@
+/*
+ * Theme LAN Chess Arena - diterjemahkan dari desain Figma:
+ *   - Background gradient gelap (terang di kiri-atas, gelap di kanan-bawah)
+ *   - Panel "kaca" (glassmorphic) dengan sudut membulat untuk kontrol
+ *   - Tombol pill (rounded penuh), terang, teks gelap tebal
+ *   - Grid board minimalis terang, bukan checkerboard coklat tradisional
+ *
+ * Dipakai lewat Theme.apply(scene) di setiap Controller layar.
+ */
+
+.root {
+    -fx-background-color: linear-gradient(from 0% 0% to 100% 100%, #55575c 0%, #232428 55%, #0c0c0d 100%);
+    -fx-font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ---------- Panel kontrol ("kartu kaca") ---------- */
+
+.card-panel {
+    -fx-background-color: linear-gradient(to bottom right, #55565a, #232427);
+    -fx-background-radius: 22;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.55), 24, 0.3, 0, 8);
+    -fx-padding: 28;
+}
+
+.info-panel {
+    -fx-background-color: linear-gradient(to bottom right, #45464a, #202124);
+    -fx-background-radius: 16;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.45), 16, 0.2, 0, 5);
+    -fx-padding: 14;
+}
+
+/* ---------- Tombol pill ---------- */
+
+.pill-button {
+    -fx-background-color: #ececec;
+    -fx-background-radius: 999;
+    -fx-text-fill: #1c1c1e;
+    -fx-font-weight: bold;
+    -fx-font-size: 13px;
+    -fx-padding: 12 30;
+    -fx-cursor: hand;
+}
+.pill-button:hover { -fx-background-color: #ffffff; }
+.pill-button:pressed { -fx-background-color: #cfcfcf; }
+.pill-button:disabled { -fx-opacity: 0.45; }
+
+.pill-button-secondary {
+    -fx-background-color: transparent;
+    -fx-background-radius: 999;
+    -fx-border-color: #7a7a7a;
+    -fx-border-radius: 999;
+    -fx-border-width: 1.5;
+    -fx-text-fill: #dddddd;
+    -fx-font-size: 12px;
+    -fx-padding: 8 22;
+    -fx-cursor: hand;
+}
+.pill-button-secondary:hover { -fx-border-color: #cccccc; -fx-text-fill: #ffffff; }
+
+/* ---------- Field & selector pill ---------- */
+
+.pill-field {
+    -fx-background-color: #d6d6d6;
+    -fx-background-radius: 999;
+    -fx-text-fill: #1c1c1e;
+    -fx-padding: 10 20;
+    -fx-font-size: 13px;
+    -fx-prompt-text-fill: #6a6a6a;
+}
+
+.pill-choice, .pill-choice .list-cell {
+    -fx-background-color: #d6d6d6;
+    -fx-background-radius: 999;
+    -fx-text-fill: #1c1c1e;
+    -fx-font-size: 13px;
+}
+.pill-choice { -fx-padding: 2 4; }
+.pill-choice .list-cell { -fx-padding: 8 18; -fx-background-radius: 999; }
+
+/* ---------- Pilihan warna (3 lingkaran: White / Random / Black) ---------- */
+
+.color-circle {
+    -fx-background-color: #d6d6d6;
+    -fx-background-radius: 999;
+    -fx-border-radius: 999;
+    -fx-border-color: transparent;
+    -fx-border-width: 3;
+    -fx-min-width: 46; -fx-min-height: 46;
+    -fx-max-width: 46; -fx-max-height: 46;
+    -fx-cursor: hand;
+}
+.color-circle:hover { -fx-border-color: #9a9a9a; }
+.color-circle-selected {
+    -fx-border-color: #f2c94c;
+}
+.color-circle-white { -fx-background-color: #f4f4f4; }
+.color-circle-black { -fx-background-color: #2b2b2b; }
+.color-circle-random {
+    -fx-background-color: linear-gradient(to right, #f4f4f4 50%, #2b2b2b 50%);
+}
+
+/* ---------- Teks ---------- */
+
+.title-text {
+    -fx-text-fill: #ffffff;
+    -fx-font-size: 28px;
+    -fx-font-weight: bold;
+}
+.subtitle-text {
+    -fx-text-fill: #9a9a9a;
+    -fx-font-size: 12px;
+}
+.section-label {
+    -fx-text-fill: #ffffff;
+    -fx-font-weight: bold;
+    -fx-font-size: 13px;
+}
+.divider-text {
+    -fx-text-fill: #8a8a8a;
+    -fx-font-size: 11px;
+}
+.status-text {
+    -fx-text-fill: #dddddd;
+    -fx-font-size: 15px;
+}
+.body-text {
+    -fx-text-fill: #cfcfcf;
+    -fx-font-size: 12px;
+}
+
+/* ---------- Jam catur ---------- */
+
+.clock-label {
+    -fx-text-fill: #e6e6e6;
+    -fx-font-size: 22px;
+    -fx-font-weight: bold;
+    -fx-font-family: "Consolas", "Courier New", monospace;
+    -fx-background-color: #1a1a1c;
+    -fx-background-radius: 10;
+    -fx-padding: 6 16;
+}
+.clock-active {
+    -fx-text-fill: #7fe07f;
+    -fx-background-color: #223522;
+}
+.clock-low {
+    -fx-text-fill: #ff6b6b;
+    -fx-background-color: #3a2020;
+}
+
+/* ---------- Riwayat langkah & chat ---------- */
+
+.history-list {
+    -fx-background-color: transparent;
+    -fx-control-inner-background: transparent;
+    -fx-text-fill: #dddddd;
+}
+.history-list .list-cell {
+    -fx-background-color: transparent;
+    -fx-text-fill: #dddddd;
+    -fx-font-size: 12px;
+    -fx-font-family: "Consolas", "Courier New", monospace;
+}
+.history-list .list-cell:filled:selected {
+    -fx-background-color: #3a3b3f;
+}
+
+.chat-area {
+    -fx-control-inner-background: #1c1d1f;
+    -fx-background-color: #1c1d1f;
+    -fx-text-fill: #dddddd;
+    -fx-font-size: 12px;
+    -fx-background-radius: 10;
+}
