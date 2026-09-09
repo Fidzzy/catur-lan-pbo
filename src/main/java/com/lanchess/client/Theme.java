@@ -12,7 +12,10 @@ public final class Theme {
     }
 
     public static void apply(Scene scene) {
-        scene.getStylesheets().add(Theme.class.getResource("/com/lanchess/client/theme.css").toExternalForm());
+        var url = Theme.class.getResource("/com/lanchess/client/theme.css");
+        if (url != null) {
+            scene.getStylesheets().add(url.toExternalForm());
+        }
     }
 
     /**

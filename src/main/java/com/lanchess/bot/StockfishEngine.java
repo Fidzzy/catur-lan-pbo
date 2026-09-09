@@ -148,7 +148,12 @@ public class StockfishEngine {
         for (int i = 0; i < tokens.length - 2; i++) {
             if (tokens[i].equals("score")) {
                 String type = tokens[i + 1]; // "cp" atau "mate"
-                int value = Integer.parseInt(tokens[i + 2]);
+                final int value;
+                try {
+                    value = Integer.parseInt(tokens[i + 2]);
+                } catch (NumberFormatException e) {
+                    continue;
+                }
                 if (type.equals("cp")) return value;
                 if (type.equals("mate")) return value >= 0 ? (100_000 - value) : (-100_000 - value);
             }

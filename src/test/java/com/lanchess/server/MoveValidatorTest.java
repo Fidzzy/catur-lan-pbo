@@ -234,7 +234,7 @@ class MoveValidatorTest {
         board[3][4] = new Pawn(PlayerColor.WHITE, 3, 4);
         board[1][3] = new Pawn(PlayerColor.BLACK, 1, 3);
         board[7][4] = new King(PlayerColor.WHITE, 7, 4);
-        board[7][0] = new Pawn(PlayerColor.WHITE, 6, 0); // dummy biar putih punya langkah lain
+        board[6][0] = new Pawn(PlayerColor.WHITE, 6, 0); // dummy biar putih punya langkah lain
         board[0][4] = new King(PlayerColor.BLACK, 0, 4);
         board[1][7] = new Pawn(PlayerColor.BLACK, 1, 7); // dummy biar hitam punya langkah lain
 

@@ -486,25 +486,31 @@ public class GameController {
     private String describeEnding(GameStatus status) {
         return switch (status) {
             case CHECKMATE -> {
+                if (state.getLoserColor() == null) yield "Skakmat! Permainan berakhir.";
                 PlayerColor winner = state.getLoserColor().opposite();
                 yield "Skakmat! " + winner + " menang.";
             }
             case STALEMATE -> "Stalemate - permainan seri.";
             case TIMEOUT -> {
+                if (state.getLoserColor() == null) yield "Waktu habis! Permainan berakhir.";
                 PlayerColor winner = state.getLoserColor().opposite();
                 yield "Waktu habis! " + winner + " menang.";
             }
             case RESIGNATION -> {
+                if (state.getLoserColor() == null) yield "Permainan selesai (salah satu pemain menyerah).";
                 PlayerColor winner = state.getLoserColor().opposite();
                 yield state.getLoserColor() == myColor
                         ? "Kamu mengundurkan diri. " + winner + " menang."
                         : winner + " menang (lawan mengundurkan diri).";
             }
-            case DRAW -> switch (state.getDrawReason()) {
-                case THREEFOLD_REPETITION -> "Seri - posisi berulang 3 kali (threefold repetition).";
-                case FIFTY_MOVE_RULE -> "Seri - 50 langkah tanpa capture/pion jalan (50-move rule).";
-                case AGREEMENT -> "Seri - kesepakatan bersama.";
-            };
+            case DRAW -> {
+                if (state.getDrawReason() == null) yield "Seri - permainan berakhir seri.";
+                yield switch (state.getDrawReason()) {
+                    case THREEFOLD_REPETITION -> "Seri - posisi berulang 3 kali (threefold repetition).";
+                    case FIFTY_MOVE_RULE -> "Seri - 50 langkah tanpa capture/pion jalan (50-move rule).";
+                    case AGREEMENT -> "Seri - kesepakatan bersama.";
+                };
+            }
             default -> "Permainan berakhir: " + status;
         };
     }
@@ -517,9 +523,12 @@ public class GameController {
         Integer checkRow = null;
         Integer checkCol = null;
         if (state.getStatus() == GameStatus.CHECK || state.getStatus() == GameStatus.CHECKMATE) {
-            var king = state.findKing(state.getCurrentTurn());
-            checkRow = king.getRow();
-            checkCol = king.getCol();
+            try {
+                var king = state.findKing(state.getCurrentTurn());
+                checkRow = king.getRow();
+                checkCol = king.getCol();
+            } catch (IllegalStateException ignored) {
+            }
         }
         boardView.render(state, selectedRow, selectedCol, currentLegalMoves, checkRow, checkCol);
         if (premoveFromRow != null) {

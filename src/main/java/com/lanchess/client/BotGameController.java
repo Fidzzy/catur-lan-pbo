@@ -449,9 +449,12 @@ public class BotGameController {
         Integer checkRow = null;
         Integer checkCol = null;
         if (state.getStatus() == GameStatus.CHECK || state.getStatus() == GameStatus.CHECKMATE) {
-            var king = state.findKing(state.getCurrentTurn());
-            checkRow = king.getRow();
-            checkCol = king.getCol();
+            try {
+                var king = state.findKing(state.getCurrentTurn());
+                checkRow = king.getRow();
+                checkCol = king.getCol();
+            } catch (IllegalStateException ignored) {
+            }
         }
         boardView.render(state, selectedRow, selectedCol, currentLegalMoves, checkRow, checkCol);
         if (premoveFromRow != null) {
@@ -476,23 +479,29 @@ public class BotGameController {
     private String describeEnding() {
         return switch (state.getStatus()) {
             case CHECKMATE -> {
+                if (state.getLoserColor() == null) yield "Skakmat! Permainan berakhir.";
                 PlayerColor winner = state.getLoserColor().opposite();
                 yield winner == myColor ? "Skakmat! Kamu menang!" : "Skakmat! Stockfish menang.";
             }
             case STALEMATE -> "Stalemate - permainan seri.";
             case TIMEOUT -> {
                 PlayerColor loser = state.getLoserColor();
+                if (loser == null) yield "Waktu habis! Permainan berakhir.";
                 yield loser == myColor ? "Waktu habis! Stockfish menang." : "Waktu habis! Kamu menang!";
             }
             case RESIGNATION -> {
                 PlayerColor loser = state.getLoserColor();
+                if (loser == null) yield "Permainan selesai (salah satu pemain menyerah).";
                 yield loser == myColor ? "Kamu mengundurkan diri. Stockfish menang." : "Stockfish mengundurkan diri. Kamu menang!";
             }
-            case DRAW -> switch (state.getDrawReason()) {
-                case THREEFOLD_REPETITION -> "Seri - posisi berulang 3 kali (threefold repetition).";
-                case FIFTY_MOVE_RULE -> "Seri - 50 langkah tanpa capture/pion jalan (50-move rule).";
-                case AGREEMENT -> "Seri - kesepakatan bersama.";
-            };
+            case DRAW -> {
+                if (state.getDrawReason() == null) yield "Seri - permainan berakhir seri.";
+                yield switch (state.getDrawReason()) {
+                    case THREEFOLD_REPETITION -> "Seri - posisi berulang 3 kali (threefold repetition).";
+                    case FIFTY_MOVE_RULE -> "Seri - 50 langkah tanpa capture/pion jalan (50-move rule).";
+                    case AGREEMENT -> "Seri - kesepakatan bersama.";
+                };
+            }
             default -> "Permainan berakhir: " + state.getStatus();
         };
     }
