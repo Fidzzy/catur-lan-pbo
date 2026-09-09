@@ -198,18 +198,29 @@ public class BotGameController {
     // =========================================================================
 
     private void handleSquareClick(int row, int col) {
+        DebugLog.log("BOT-CLICK", "klik (%d,%d) | giliran=%s saya=%s status=%s botThinking=%s selected=%s".formatted(
+                row, col, state.getCurrentTurn(), myColor, state.getStatus(), botThinking,
+                selectedRow == null ? "-" : "(" + selectedRow + "," + selectedCol + ")"));
         if (gameOver) return;
+        if (row < 0 || row >= 8 || col < 0 || col >= 8) return;
 
         if (state.getCurrentTurn() != myColor || botThinking) {
+            DebugLog.log("BOT-CLICK", "-> bukan giliran saya / bot berpikir, masuk premove");
             handlePremoveClick(row, col);
             return;
         }
 
-        clearPremove();
+        // Hanya field premove yang dibersihkan, JANGAN sentuh seleksi!
+        // (BUG LAMA: clearPremove() ikut menghapus selectedRow & currentLegalMoves
+        //  sehingga klik tujuan tidak pernah cocok - tidak ada bidak bisa jalan.)
+        clearPremoveKeepSelection();
         Piece clicked = state.getPieceAt(row, col);
 
         if (selectedRow == null) {
+            DebugLog.log("BOT-CLICK", "-> seleksi: diklik="
+                    + (clicked == null ? "kosong" : clicked.getColor() + " " + clicked.getType()));
             trySelect(row, col, clicked);
+            DebugLog.log("BOT-CLICK", "-> legal moves dari sini: " + currentLegalMoves.size());
             return;
         }
 
@@ -224,6 +235,7 @@ public class BotGameController {
                 .findFirst();
 
         if (chosen.isEmpty()) {
+            DebugLog.log("BOT-CLICK", "-> tujuan TIDAK ada di legal moves, coba seleksi ulang");
             trySelect(row, col, clicked);
             return;
         }
@@ -233,6 +245,7 @@ public class BotGameController {
             move.setPromotionType(askPromotionChoice());
         }
 
+        DebugLog.log("BOT-CLICK", "-> EKSEKUSI lokal: " + move);
         applyMove(move);
         clearSelection();
         redrawBoard();
@@ -246,18 +259,66 @@ public class BotGameController {
 
     /** Alur klik selagi giliran bot / bot sedang berpikir - antrikan sebagai premove. */
     private void handlePremoveClick(int row, int col) {
+        if (row < 0 || row >= 8 || col < 0 || col >= 8) return;
         Piece clicked = state.getPieceAt(row, col);
 
+        // Tahap 1: belum ada bidak sumber premove -> klik harus ke bidak sendiri.
+        // (BUG LAMA: klik pertama di sini tidak pernah menyimpan premoveFromRow/Col,
+        //  sehingga klik kedua selalu masuk lagi ke cabang ini dan premove tidak
+        //  pernah terbentuk - bidak terlihat bisa dipilih tapi tidak bisa jalan.)
         if (premoveFromRow == null) {
             if (clicked != null && clicked.getColor() == myColor) {
+                premoveFromRow = row;
+                premoveFromCol = col;
+                selectedRow = row;
+                selectedCol = col;
+                currentLegalMoves = MoveValidator.getLegalMoves(state, row, col);
+            } else {
+                clearSelection();
+            }
+            redrawBoard();
+            return;
+        }
+
+        // Tahap 1b: sumber sudah dipilih tapi tujuan belum.
+        if (premoveToRow == null) {
+            // Klik ulang sumber -> batalkan premove
+            if (row == premoveFromRow && col == premoveFromCol) {
+                clearPremove();
+                redrawBoard();
+                return;
+            }
+            // Klik kotak tujuan yang legal -> KUNCI premove (sumber + tujuan lengkap)
+            boolean validTarget = currentLegalMoves.stream()
+                    .anyMatch(m -> m.getToRow() == row && m.getToCol() == col);
+            if (validTarget) {
+                premoveToRow = row;
+                premoveToCol = col;
+                Piece movingPiece = state.getPieceAt(premoveFromRow, premoveFromCol);
+                boolean isPromotionCandidate = movingPiece != null && movingPiece.getType() == PieceType.PAWN
+                        && (row == 0 || row == 7);
+                premovePromotionType = isPromotionCandidate ? askPromotionChoice() : null;
+                clearSelection();
+                redrawBoard();
+                return;
+            }
+            // Klik bidak sendiri yang lain -> pindahkan sumber premove ke situ
+            if (clicked != null && clicked.getColor() == myColor) {
+                premoveFromRow = row;
+                premoveFromCol = col;
                 selectedRow = row;
                 selectedCol = col;
                 currentLegalMoves = MoveValidator.getLegalMoves(state, row, col);
                 redrawBoard();
+                return;
             }
+            // Klik kotak lain yang bukan target -> batalkan
+            clearPremove();
+            redrawBoard();
             return;
         }
 
+        // Tahap 2: premove lengkap, klik ulang sumber membatalkan
         if (row == premoveFromRow && col == premoveFromCol) {
             clearPremove();
             redrawBoard();
@@ -269,20 +330,19 @@ public class BotGameController {
 
         if (!isValidTarget) {
             if (clicked != null && clicked.getColor() == myColor) {
+                premoveFromRow = row;
+                premoveFromCol = col;
                 selectedRow = row;
                 selectedCol = col;
                 currentLegalMoves = MoveValidator.getLegalMoves(state, row, col);
-                premoveFromRow = null;
-                premoveFromCol = null;
                 premoveToRow = null;
                 premoveToCol = null;
+                premovePromotionType = null;
                 redrawBoard();
             }
             return;
         }
 
-        premoveFromRow = selectedRow;
-        premoveFromCol = selectedCol;
         premoveToRow = row;
         premoveToCol = col;
 
@@ -304,9 +364,27 @@ public class BotGameController {
         clearSelection();
     }
 
+    /**
+     * Batalkan premove tersisa TANPA menghapus seleksi/highlight saat ini.
+     * Dipakai di awal alur klik normal (giliran kita) - seleksi &amp; daftar
+     * legal moves harus tetap hidup supaya klik tujuan bisa dicocokkan.
+     */
+    private void clearPremoveKeepSelection() {
+        premoveFromRow = null;
+        premoveFromCol = null;
+        premoveToRow = null;
+        premoveToCol = null;
+        premovePromotionType = null;
+    }
+
     /** Coba kirim premove yang sedang diantrikan setelah bot selesai jalan. Buang diam-diam kalau sudah ilegal. */
     private void trySubmitPremove() {
         if (premoveFromRow == null || gameOver || state.getCurrentTurn() != myColor) return;
+        // Sumber tanpa tujuan (baru tahap pilih bidak) bukan premove yang bisa dikirim
+        if (premoveToRow == null) {
+            clearPremove();
+            return;
+        }
 
         List<Move> nowLegal = MoveValidator.getLegalMoves(state, premoveFromRow, premoveFromCol);
         Optional<Move> stillValid = nowLegal.stream()
@@ -457,7 +535,9 @@ public class BotGameController {
             }
         }
         boardView.render(state, selectedRow, selectedCol, currentLegalMoves, checkRow, checkCol);
-        if (premoveFromRow != null) {
+        // Premove baru di-highlight kalau sumber DAN tujuan sudah lengkap
+        if (premoveFromRow != null && premoveToRow != null
+                && premoveFromCol != null && premoveToCol != null) {
             boardView.drawPremoveHighlight(premoveFromRow, premoveFromCol, premoveToRow, premoveToCol);
         }
     }

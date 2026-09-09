@@ -224,21 +224,41 @@ public class GameController {
     // =========================================================================
 
     private void handleSquareClick(int row, int col) {
+        DebugLog.log("LAN-CLICK", "klik (%d,%d) | giliran=%s saya=%s status=%s gameOver=%s selected=%s".formatted(
+                row, col, state.getCurrentTurn(), myColor, state.getStatus(), gameOver,
+                selectedRow == null ? "-" : "(" + selectedRow + "," + selectedCol + ")"));
         if (gameOver) return;
+        if (row < 0 || row >= 8 || col < 0 || col >= 8) return;
+
+        // Belum ada lawan (host sendirian menunggu) -> belum bisa jalan
+        if (state.getStatus() == GameStatus.WAITING_FOR_PLAYER) {
+            DebugLog.log("LAN-CLICK", "-> DITOLAK: masih WAITING_FOR_PLAYER (lawan belum connect)");
+            showAlert(Alert.AlertType.INFORMATION, "Menunggu lawan",
+                    "Menunggu pemain kedua terhubung sebelum permainan dimulai.");
+            return;
+        }
 
         if (state.getCurrentTurn() != myColor) {
+            DebugLog.log("LAN-CLICK", "-> bukan giliran saya, masuk premove");
             handlePremoveClick(row, col);
             return;
         }
 
         // Kalau ada premove tersisa dari sebelumnya (jarang terjadi, tapi jaga-jaga) dan sekarang
         // ternyata giliran kita, batalkan dulu supaya tidak membingungkan alur klik normal.
-        clearPremove();
+        // PENTING: hanya field premove yang dibersihkan, JANGAN sentuh seleksi!
+        // (BUG LAMA: clearPremove() ikut memanggil clearSelection() sehingga selectedRow dan
+        //  currentLegalMoves selalu kosong di setiap klik - akibatnya klik tujuan TIDAK PERNAH
+        //  cocok dengan legal moves dan TIDAK ADA bidak yang bisa jalan. Terbukti via click-debug.log:
+        //  klik tujuan selalu jatuh ke "coba seleksi ulang" dengan kotak kosong.)
+        clearPremoveKeepSelection();
 
         Piece clicked = state.getPieceAt(row, col);
 
         if (selectedRow == null) {
+            DebugLog.log("LAN-CLICK", "-> seleksi: diklik=" + describePiece(clicked));
             trySelect(row, col, clicked);
+            DebugLog.log("LAN-CLICK", "-> legal moves dari sini: " + currentLegalMoves.size());
             return;
         }
 
@@ -254,6 +274,7 @@ public class GameController {
 
         if (chosen.isEmpty()) {
             // Klik di kotak lain milik sendiri -> pindah seleksi ke situ, bukan error
+            DebugLog.log("LAN-CLICK", "-> tujuan TIDAK ada di legal moves, coba seleksi ulang");
             trySelect(row, col, clicked);
             return;
         }
@@ -264,27 +285,81 @@ public class GameController {
             move.setPromotionType(picked);
         }
 
+        DebugLog.log("LAN-CLICK", "-> KIRIM MOVE ke server: " + move);
         client.sendMessage(new Message(MessageType.MOVE, move, myColor.name()));
         clearSelection();
         redrawBoard();
     }
 
+    private static String describePiece(Piece piece) {
+        if (piece == null) return "kosong";
+        return piece.getColor() + " " + piece.getType() + " (internal " + piece.getRow() + "," + piece.getCol() + ")";
+    }
+
     /** Alur klik saat BUKAN giliran kita - pilih bidak sendiri, lalu klik tujuan untuk mengantrikan premove. */
     private void handlePremoveClick(int row, int col) {
+        if (row < 0 || row >= 8 || col < 0 || col >= 8) return;
         Piece clicked = state.getPieceAt(row, col);
 
+        // Tahap 1: belum ada bidak sumber premove -> klik harus ke bidak sendiri.
+        // (BUG LAMA: klik pertama di sini tidak pernah menyimpan premoveFromRow/Col,
+        //  sehingga klik kedua selalu masuk lagi ke cabang ini dan premove tidak
+        //  pernah terbentuk - bidak terlihat bisa dipilih tapi tidak bisa jalan.)
         if (premoveFromRow == null) {
             if (clicked != null && clicked.getColor() == myColor) {
+                premoveFromRow = row;
+                premoveFromCol = col;
                 selectedRow = row;
                 selectedCol = col;
                 // Preview legal move SEKARANG (posisi saat ini) - hanya perkiraan, posisi
                 // bisa berubah begitu lawan jalan sebelum giliran kita benar-benar tiba.
                 currentLegalMoves = MoveValidator.getLegalMoves(state, row, col);
-                redrawBoard();
+            } else {
+                clearSelection();
             }
+            redrawBoard();
             return;
         }
 
+        // Tahap 1b: sumber sudah dipilih tapi tujuan belum.
+        if (premoveToRow == null) {
+            // Klik ulang sumber -> batalkan premove
+            if (row == premoveFromRow && col == premoveFromCol) {
+                clearPremove();
+                redrawBoard();
+                return;
+            }
+            // Klik kotak tujuan yang legal -> KUNCI premove (sumber + tujuan lengkap)
+            boolean validTarget = currentLegalMoves.stream()
+                    .anyMatch(m -> m.getToRow() == row && m.getToCol() == col);
+            if (validTarget) {
+                premoveToRow = row;
+                premoveToCol = col;
+                Piece movingPiece = state.getPieceAt(premoveFromRow, premoveFromCol);
+                boolean isPromotionCandidate = movingPiece != null && movingPiece.getType() == PieceType.PAWN
+                        && (row == 0 || row == 7);
+                premovePromotionType = isPromotionCandidate ? askPromotionChoice() : null;
+                clearSelection();
+                redrawBoard();
+                return;
+            }
+            // Klik bidak sendiri yang lain -> pindahkan sumber premove ke situ
+            if (clicked != null && clicked.getColor() == myColor) {
+                premoveFromRow = row;
+                premoveFromCol = col;
+                selectedRow = row;
+                selectedCol = col;
+                currentLegalMoves = MoveValidator.getLegalMoves(state, row, col);
+                redrawBoard();
+                return;
+            }
+            // Klik kotak lain yang bukan target -> batalkan
+            clearPremove();
+            redrawBoard();
+            return;
+        }
+
+        // Tahap 2: premove lengkap, klik ulang membatalkan
         if (row == premoveFromRow && col == premoveFromCol) {
             clearPremove();
             redrawBoard();
@@ -295,19 +370,21 @@ public class GameController {
                 .anyMatch(m -> m.getToRow() == row && m.getToCol() == col);
 
         if (!isValidTarget) {
-            // Klik kotak lain milik sendiri -> pindah seleksi premove ke situ
+            // Klik kotak lain milik sendiri -> pindah sumber premove ke situ
             if (clicked != null && clicked.getColor() == myColor) {
+                premoveFromRow = row;
+                premoveFromCol = col;
                 selectedRow = row;
                 selectedCol = col;
                 currentLegalMoves = MoveValidator.getLegalMoves(state, row, col);
-                clearPremoveTargetOnly();
+                premoveToRow = null;
+                premoveToCol = null;
+                premovePromotionType = null;
                 redrawBoard();
             }
             return;
         }
 
-        premoveFromRow = selectedRow;
-        premoveFromCol = selectedCol;
         premoveToRow = row;
         premoveToCol = col;
 
@@ -346,7 +423,12 @@ public class GameController {
         clearSelection();
     }
 
-    private void clearPremoveTargetOnly() {
+    /**
+     * Batalkan premove tersisa TANPA menghapus seleksi/highlight saat ini.
+     * Dipakai di awal alur klik normal (giliran kita) - seleksi &amp; daftar
+     * legal moves harus tetap hidup supaya klik tujuan bisa dicocokkan.
+     */
+    private void clearPremoveKeepSelection() {
         premoveFromRow = null;
         premoveFromCol = null;
         premoveToRow = null;
@@ -360,7 +442,11 @@ public class GameController {
      * sudah tidak legal lagi di posisi terbaru, buang diam-diam.
      */
     private void trySubmitPremove() {
-        if (premoveFromRow == null) return;
+        // Sumber tanpa tujuan (baru tahap pilih bidak) bukan premove yang bisa dikirim
+        if (premoveFromRow == null || premoveToRow == null) {
+            clearPremove();
+            return;
+        }
 
         List<Move> nowLegal = MoveValidator.getLegalMoves(state, premoveFromRow, premoveFromCol);
         Optional<Move> stillValid = nowLegal.stream()
@@ -434,6 +520,8 @@ public class GameController {
         switch (message.getType()) {
             case STATE_UPDATE -> {
                 GameState newState = message.getPayloadAs(GameState.class);
+                DebugLog.log("LAN-NET", "STATE_UPDATE diterima: giliran=%s status=%s".formatted(
+                        newState.getCurrentTurn(), newState.getStatus()));
                 Platform.runLater(() -> {
                     this.state = newState;
                     this.lastStateReceivedAtMillis = System.currentTimeMillis();
@@ -450,6 +538,7 @@ public class GameController {
             }
             case MOVE_REJECTED -> {
                 String reason = message.getPayloadAs(String.class);
+                DebugLog.log("LAN-NET", "MOVE_REJECTED dari server: " + reason);
                 Platform.runLater(() -> {
                     clearSelection();
                     redrawBoard();
@@ -531,7 +620,10 @@ public class GameController {
             }
         }
         boardView.render(state, selectedRow, selectedCol, currentLegalMoves, checkRow, checkCol);
-        if (premoveFromRow != null) {
+        // Premove baru di-highlight kalau sumber DAN tujuan sudah lengkap
+        // (sumber saja = tahap seleksi, cukup highlight kuning biasa dari render()).
+        if (premoveFromRow != null && premoveToRow != null
+                && premoveFromCol != null && premoveToCol != null) {
             boardView.drawPremoveHighlight(premoveFromRow, premoveFromCol, premoveToRow, premoveToCol);
         }
     }
