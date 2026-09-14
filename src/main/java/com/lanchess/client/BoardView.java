@@ -174,6 +174,8 @@ public class BoardView extends Canvas {
     }
 
     private static final Color PREMOVE_HIGHLIGHT = Color.web("#4A90D9", 0.45);
+    private static final Color HINT_FROM_HIGHLIGHT = Color.web("#2FA84F", 0.55);
+    private static final Color HINT_TO_RING = Color.web("#2FA84F", 0.9);
 
     /** Highlight SELURUH antrean premove + nomor urut tiap langkah. Panggil SETELAH render(). */
     public void drawPremoveHighlights(List<PremoveQueue.Entry> entries) {
@@ -196,8 +198,26 @@ public class BoardView extends Canvas {
         }
     }
 
-    private void drawLegalMoveHints(GraphicsContext gc, GameState state, List<Move> legalMoves) {
-        for (Move move : legalMoves) {
+    /**
+     * Highlight saran langkah (hint) dari engine: kotak asal hijau penuh +
+     * ring tebal di kotak tujuan. Panggil SETELAH render() (dan setelah
+     * highlight premove supaya hint selalu terlihat paling atas).
+     */
+    public void drawHintHighlight(int fromRow, int fromCol, int toRow, int toCol) {
+        GraphicsContext gc = getGraphicsContext2D();
+        fillSquare(gc, fromRow, fromCol, HINT_FROM_HIGHLIGHT);
+
+        int dr = toDisplayRow(toRow);
+        int dc = toDisplayCol(toCol);
+        double centerX = dc * squareSize + squareSize / 2.0;
+        double centerY = dr * squareSize + squareSize / 2.0;
+        gc.setStroke(HINT_TO_RING);
+        gc.setLineWidth(5);
+        double radius = squareSize * 0.42;
+        gc.strokeOval(centerX - radius, centerY - radius, radius * 2, radius * 2);
+    }
+
+    private void drawLegalMoveHints(GraphicsContext gc, GameState state, List<Move> legalMoves) {        for (Move move : legalMoves) {
             int dr = toDisplayRow(move.getToRow());
             int dc = toDisplayCol(move.getToCol());
             double centerX = dc * squareSize + squareSize / 2.0;

@@ -219,6 +219,10 @@ Semua di `MoveValidator` (server-side, single source of truth):
 - [x] **Threefold repetition** — otomatis terdeteksi, termasuk posisi awal permainan ikut dihitung
 - [x] **50-move rule** — otomatis terdeteksi di half-move ke-100 sejak capture/pawn-move terakhir
 - [x] **Premove tak terbatas** — client-side, mode LAN & Bot (`PremoveQueue`): antrean banyak langkah + nomor urut, berhenti & buang semua kalau entri tak legal (kotak terisi/skak), undo LIFO, klik-kanan buang semua
+- [x] **Rematch** — dialog "Main Lagi" saat game over; mode Bot: engine fresh + pengaturan sama; mode LAN: protokol `REMATCH_OFFER/ACCEPT/DECLINE/START`, server reset state + restart jam di koneksi yang sama (warna tetap)
+- [x] **Hint (mode Bot)** — tombol "💡 Hint": saran langkah Stockfish + highlight hijau & notasi kotak, kedaluwarsa otomatis kalau posisi berubah
+- [x] **Eval bar + win chance (mode Bot)** — bar vertikal + label skor/peluang menang (logistik standar), dihitung saat engine menganggur via single-thread executor bersama bot/hint/draw
+- [x] **Undo/takeback (mode Bot)** — tombol "↩ Undo": batalkan 1 langkah penuh via `GameStateSnapshot` (papan+riwayat+repetisi+jam ikut kembali), bisa dipakai bahkan setelah skakmat/timeout
 - [x] Unit test JUnit 5: `MoveValidatorTest` (22 kasus) + `FenConverterTest` (10 kasus) = 32 test
 - [ ] Increment/delay pada jam catur (saat ini sudden-death murni)
 - [ ] Insufficient material draw (mis. King vs King) — belum ada, opsional

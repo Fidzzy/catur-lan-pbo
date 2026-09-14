@@ -132,6 +132,19 @@ public class Move implements Serializable {
         return castling && toCol > fromCol;
     }
 
+    /**
+     * Salinan penuh langkah ini (termasuk flag castling/en passant/promosi/
+     * capture). Dipakai GameStateSnapshot untuk undo/takeback.
+     */
+    public Move copy() {
+        Move copy = new Move(fromRow, fromCol, toRow, toCol, pieceType, pieceColor);
+        copy.setCastling(castling);
+        copy.setEnPassant(enPassant);
+        copy.setPromotionType(promotionType);
+        copy.setCapturedType(capturedType);
+        return copy;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;

@@ -145,7 +145,7 @@ public class BotSetupController {
             engine.setElo(difficulty.getEloRating());
             engine.newGame();
 
-            Platform.runLater(() -> new BotGameController(stage, engine, difficulty, timeControl, myColor));
+            Platform.runLater(() -> new BotGameController(stage, engine, difficulty, timeControl, myColor, enginePath));
 
         } catch (IOException e) {
             Platform.runLater(() -> {

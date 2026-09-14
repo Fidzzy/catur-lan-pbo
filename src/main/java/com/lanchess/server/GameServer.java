@@ -58,6 +58,9 @@ public class GameServer {
     /** Warna pemain yang sedang menawarkan seri, null kalau tidak ada tawaran pending. */
     private PlayerColor pendingDrawOfferFrom;
 
+    /** Warna pemain yang sedang mengajak rematch, null kalau tidak ada ajakan pending. */
+    private PlayerColor pendingRematchOfferFrom;
+
     public static void main(String[] args) {
         int port = PORT;
         if (args.length > 0) {
@@ -216,6 +219,90 @@ public class GameServer {
         gameState.setStatus(GameStatus.TIMEOUT);
         broadcastState();
         broadcastEnd();
+    }
+
+    // =========================================================================
+    // Rematch (main lagi setelah game over)
+    // =========================================================================
+
+    /**
+     * Teruskan ajakan rematch dari sender ke lawannya, dan catat sebagai
+     * pending. Kalau ternyata LAWAN juga sudah mengajak lebih dulu (kedua
+     * pemain menekan "Main Lagi" hampir bersamaan), langsung mulai rematch
+     * tanpa menunggu accept eksplisit.
+     */
+    public synchronized void relayRematchOffer(ClientHandler sender) {
+        if (isGameActive()) {
+            log("Ajakan rematch dari " + sender.getAssignedColor() + " diabaikan (game masih berjalan).");
+            return;
+        }
+        PlayerColor from = sender.getAssignedColor();
+        if (pendingRematchOfferFrom != null && pendingRematchOfferFrom != from) {
+            log("Rematch disepakati (kedua pemain mengajak).");
+            startRematch();
+            return;
+        }
+        pendingRematchOfferFrom = from;
+        Message offer = new Message(MessageType.REMATCH_OFFER, null, from.name());
+        for (ClientHandler client : clients) {
+            if (client != sender) client.sendMessage(offer);
+        }
+    }
+
+    /** Teruskan notifikasi penolakan rematch ke lawan (si pengajak), dan hapus status pending. */
+    public synchronized void relayRematchDecline(ClientHandler sender) {
+        pendingRematchOfferFrom = null;
+        Message decline = new Message(MessageType.REMATCH_DECLINE, null, sender.getAssignedColor().name());
+        for (ClientHandler client : clients) {
+            if (client != sender) client.sendMessage(decline);
+        }
+    }
+
+    /**
+     * Finalisasi rematch kalau memang ada ajakan pending dari LAWAN
+     * acceptingColor.
+     *
+     * @return true kalau ajakan valid & permainan baru berhasil dimulai.
+     */
+    public synchronized boolean acceptRematchIfPending(PlayerColor acceptingColor) {
+        if (isGameActive()) return false;
+        if (pendingRematchOfferFrom == null || pendingRematchOfferFrom == acceptingColor) {
+            return false;
+        }
+        log("Rematch disepakati (diterima oleh " + acceptingColor + ").");
+        startRematch();
+        return true;
+    }
+
+    /**
+     * Mulai permainan baru di atas koneksi yang SUDAH ada: reset state
+     * (papan awal, giliran WHITE, jam kembali penuh), restart jam kalau
+     * pakai timer, lalu broadcast STATE_UPDATE + REMATCH_START supaya kedua
+     * client me-reset UI-nya. Warna kedua pemain TIDAK berubah.
+     */
+    private synchronized void startRematch() {
+        pendingRematchOfferFrom = null;
+        pendingDrawOfferFrom = null;
+        if (gameClock != null) gameClock.stop();
+        gameState.reset();
+        log("Rematch dimulai! TimeControl=" + gameState.getTimeControl());
+        if (!gameState.getTimeControl().isUnlimited()) {
+            gameClock = new GameClock(gameState, this::handleTimeout);
+            gameClock.startTurn();
+        }
+        broadcastState();
+        Message start = new Message(MessageType.REMATCH_START, gameState);
+        for (ClientHandler client : clients) {
+            client.sendMessage(start);
+        }
+    }
+
+    /** True kalau permainan sedang berjalan (rematch/draw-accept hanya valid setelah game over). */
+    private synchronized boolean isGameActive() {
+        GameStatus status = gameState.getStatus();
+        return status == GameStatus.PLAYING
+                || status == GameStatus.CHECK
+                || status == GameStatus.WAITING_FOR_PLAYER;
     }
 
     /** Broadcast STATE_UPDATE (snapshot GameState terkini) ke SEMUA client. Observer notify. */

@@ -448,12 +448,24 @@ public class GameController {
             case DRAW_OFFER -> Platform.runLater(this::handleIncomingDrawOffer);
             case DRAW_DECLINE -> Platform.runLater(() ->
                     showAlert(Alert.AlertType.INFORMATION, "Tawaran Seri", "Lawan menolak tawaran seri."));
+            case REMATCH_OFFER -> Platform.runLater(this::handleIncomingRematchOffer);
+            case REMATCH_DECLINE -> Platform.runLater(() ->
+                    showAlert(Alert.AlertType.INFORMATION, "Rematch", "Lawan menolak ajakan main lagi."));
+            case REMATCH_START -> {
+                GameState freshState = message.getPayloadAs(GameState.class);
+                Platform.runLater(() -> {
+                    shutdown();
+                    new GameController(stage, client, myColor, freshState);
+                });
+            }
             case END -> {
                 GameStatus finalStatus = message.getPayloadAs(GameStatus.class);
                 Platform.runLater(() -> {
                     gameOver = true;
                     premoveQueue.clear();
-                    showAlert(Alert.AlertType.INFORMATION, "Permainan Selesai", describeEnding(finalStatus));
+                    refreshUiState();
+                    redrawBoard();
+                    showGameOverDialog(finalStatus);
                 });
             }
             case ERROR -> {
@@ -559,9 +571,61 @@ public class GameController {
         alert.showAndWait();
     }
 
+    // =========================================================================
+    // Rematch (main lagi di atas koneksi yang sama)
+    // =========================================================================
+
+    /** Dialog game-over dengan opsi rematch. Tulisan hasil tetap dari describeEnding(). */
+    private void showGameOverDialog(GameStatus finalStatus) {
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.setTitle("Permainan Selesai");
+        alert.setHeaderText(null);
+        alert.setContentText(describeEnding(finalStatus) + "\n\nMain lagi?");
+        ButtonType rematchBtn = new ButtonType("Main Lagi", ButtonType.OK.getButtonData());
+        ButtonType closeBtn = new ButtonType("Tutup", ButtonType.CANCEL.getButtonData());
+        alert.getButtonTypes().setAll(rematchBtn, closeBtn);
+
+        Optional<ButtonType> result = alert.showAndWait();
+        if (result.isPresent() && result.get() == rematchBtn) {
+            onRematchClicked();
+        }
+    }
+
+    /** Kirim ajakan rematch ke lawan. Hanya valid setelah game over (dicek juga di server). */
+    private void onRematchClicked() {
+        if (!gameOver) return;
+        client.sendMessage(new Message(MessageType.REMATCH_OFFER, null, myColor.name()));
+        statusLabel.setText("Menunggu jawaban rematch dari lawan...");
+    }
+
+    private void handleIncomingRematchOffer() {
+        // Tawaran basi (mis. game sudah rematch duluan) diabaikan.
+        if (!gameOver) return;
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.setTitle("Ajakan Rematch");
+        alert.setHeaderText(null);
+        alert.setContentText("Lawan mengajak main lagi. Terima?");
+        ButtonType acceptBtn = new ButtonType("Terima", ButtonType.OK.getButtonData());
+        ButtonType declineBtn = new ButtonType("Tolak", ButtonType.CANCEL.getButtonData());
+        alert.getButtonTypes().setAll(acceptBtn, declineBtn);
+
+        Optional<ButtonType> result = alert.showAndWait();
+        if (result.isPresent() && result.get() == acceptBtn) {
+            client.sendMessage(new Message(MessageType.REMATCH_ACCEPT, null, myColor.name()));
+        } else {
+            client.sendMessage(new Message(MessageType.REMATCH_DECLINE, null, myColor.name()));
+        }
+    }
+
+    /** Hentikan ticker jam sebelum controller ini diganti controller baru (rematch) atau menu. */
+    private void shutdown() {
+        gameOver = true;
+        if (clockTicker != null) clockTicker.stop();
+    }
+
     private void showAlertAndReturnToMenu(String title, String content) {
         showAlert(Alert.AlertType.ERROR, title, content);
-        if (clockTicker != null) clockTicker.stop();
+        shutdown();
         new MainMenuController(stage).show();
     }
 
@@ -605,8 +669,7 @@ public class GameController {
 
     /** Hentikan ticker, nonaktifkan callback disconnect, putus socket, tampilkan menu utama. */
     private void returnToMenu() {
-        gameOver = true;
-        if (clockTicker != null) clockTicker.stop();
+        shutdown();
         // Cegah alert "Koneksi terputus" muncul saat disconnect yang disengaja ini.
         client.setOnDisconnected(() -> { });
         client.disconnect();

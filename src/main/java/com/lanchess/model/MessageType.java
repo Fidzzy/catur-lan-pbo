@@ -17,6 +17,10 @@ import java.io.Serializable;
  *   DRAW_ACCEPT   : (client -> server) tidak butuh payload - lawan menerima tawaran seri
  *   DRAW_DECLINE  : (client -> server -> diteruskan ke penawar) tidak butuh payload - tawaran seri ditolak
  *   END           : (server -> client) GameStatus - hasil akhir permainan (CHECKMATE/STALEMATE/DRAW/TIMEOUT/RESIGNATION)
+ *   REMATCH_OFFER : (client -> server -> diteruskan ke lawan) tidak butuh payload - ajakan main lagi (hanya valid setelah game over)
+ *   REMATCH_ACCEPT: (client -> server) tidak butuh payload - lawan menerima ajakan rematch
+ *   REMATCH_DECLINE: (client -> server -> diteruskan ke pengajak) tidak butuh payload - ajakan rematch ditolak
+ *   REMATCH_START : (server -> client) GameState - state fresh permainan baru, kedua client reset UI & mulai lagi
  *   ERROR         : (dua arah) String - pesan error umum
  *   DISCONNECT    : (dua arah) tidak butuh payload - pemberitahuan client keluar
  */
@@ -33,5 +37,9 @@ public enum MessageType implements Serializable {
     DRAW_DECLINE,
     END,
     ERROR,
-    DISCONNECT
+    DISCONNECT,
+    REMATCH_OFFER,
+    REMATCH_ACCEPT,
+    REMATCH_DECLINE,
+    REMATCH_START
 }

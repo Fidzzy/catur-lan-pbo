@@ -5,6 +5,7 @@ import com.lanchess.bot.FenConverter;
 import com.lanchess.bot.StockfishEngine;
 import com.lanchess.model.DrawReason;
 import com.lanchess.model.GameState;
+import com.lanchess.model.GameStateSnapshot;
 import com.lanchess.model.GameStatus;
 import com.lanchess.model.Move;
 import com.lanchess.model.PieceType;
@@ -20,6 +21,7 @@ import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
 import javafx.scene.control.ChoiceDialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressIndicator;
@@ -29,8 +31,12 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Mode single-player melawan Stockfish. TIDAK memakai NetworkClient/Socket
@@ -51,8 +57,25 @@ public class BotGameController {
     private final Stage stage;
     private final StockfishEngine engine;
     private final BotDifficulty difficulty;
+    private final TimeControl timeControl;
     private final PlayerColor myColor;
     private final PlayerColor botColor;
+    private final String enginePath;
+
+    /**
+     * SATU-SATUNYA jalur pemakaian engine: semua pemanggilan blocking
+     * (getBestMove/evaluate) antre di executor single-thread ini, sehingga
+     * TIDAK PERNAH ada dua request UCI bersamaan walau hint/eval/draw/offer
+     * dan giliran bot diminta berurutan cepat. Daemon - tidak menahan exit.
+     */
+    private final ExecutorService engineExec = Executors.newSingleThreadExecutor(r -> {
+        Thread thread = new Thread(r, "BotEngineWorker");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    /** True setelah controller ini dibuang (rematch/menu/close) - semua callback telat wajib no-op. */
+    private boolean disposed = false;
 
     private final GameState state = new GameState();
     private GameClock localClock;
@@ -66,21 +89,41 @@ public class BotGameController {
     // --- Premove: antrean tak terbatas selagi bot berpikir (logika di PremoveQueue) ---
     private final PremoveQueue premoveQueue = new PremoveQueue();
 
+    // --- Hint: saran langkah engine (kotak asal+tujuan, null = tidak ada hint aktif) ---
+    private Integer hintFromRow;
+    private Integer hintFromCol;
+    private Integer hintToRow;
+    private Integer hintToCol;
+    private boolean hintThinking = false;
+
+    // --- Eval bar: dihitung berkala saat engine menganggur ---
+    private boolean evalRunning = false;
+
+    // --- Undo: snapshot SEBELUM tiap langkah dieksekusi (maksimal 200 half-move) ---
+    private static final int MAX_UNDO_SNAPSHOTS = 200;
+    private final Deque<GameStateSnapshot> undoStack = new ArrayDeque<>();
+
     private final BoardView boardView = new BoardView();
     private final Label statusLabel = new Label();
     private final Label infoLabel = new Label();
     private final ProgressIndicator thinkingIndicator = new ProgressIndicator();
     private final ClockPanel clockPanel = new ClockPanel();
     private final MoveHistoryPanel historyPanel = new MoveHistoryPanel();
+    private final EvalBar evalBar = new EvalBar(BoardView.DEFAULT_SQUARE_SIZE * 8);
     private AnimationTimer clockTicker;
 
+    private Button hintButton;
+    private Button undoButton;
+
     public BotGameController(Stage stage, StockfishEngine engine, BotDifficulty difficulty,
-                              TimeControl timeControl, PlayerColor myColor) {
+                             TimeControl timeControl, PlayerColor myColor, String enginePath) {
         this.stage = stage;
         this.engine = engine;
         this.difficulty = difficulty;
+        this.timeControl = timeControl;
         this.myColor = myColor;
         this.botColor = myColor.opposite();
+        this.enginePath = enginePath;
 
         boardView.setFlipped(myColor == PlayerColor.BLACK);
         state.setTimeControl(timeControl);
@@ -126,10 +169,18 @@ public class BotGameController {
         offerDrawButton.getStyleClass().add("pill-button-secondary");
         offerDrawButton.setOnAction(e -> onOfferDrawClicked());
 
+        hintButton = new Button("💡 Hint");
+        hintButton.getStyleClass().add("pill-button-secondary");
+        hintButton.setOnAction(e -> onHintClicked());
+
+        undoButton = new Button("↩ Undo");
+        undoButton.getStyleClass().add("pill-button-secondary");
+        undoButton.setOnAction(e -> onUndoClicked());
+
         HBox statusRow = new HBox(8, statusLabel, thinkingIndicator);
         statusRow.setAlignment(Pos.CENTER);
 
-        HBox actionRow = new HBox(8, resignButton, offerDrawButton, backButton);
+        HBox actionRow = new HBox(8, resignButton, offerDrawButton, hintButton, undoButton, backButton);
         actionRow.setAlignment(Pos.CENTER);
 
         VBox topBox = new VBox(6, infoLabel, clockPanel, statusRow, actionRow);
@@ -153,12 +204,16 @@ public class BotGameController {
 
         historyPanel.refresh(state.getMoveHistory());
 
-        HBox center = new HBox(20, boardView, historyPanel);
+        HBox center = new HBox(16, evalBar, boardView, historyPanel);
         center.setAlignment(Pos.CENTER);
         root.setCenter(center);
 
         refreshStatus();
+        updateActionButtons();
         redrawBoard();
+
+        // Evaluasi posisi awal (engine masih menganggur di sini, kecuali bot jalan duluan).
+        requestEvalUpdate();
 
         Scene scene = new Scene(root);
         Theme.apply(scene);
@@ -168,9 +223,17 @@ public class BotGameController {
         stage.show();
 
         stage.setOnCloseRequest(e -> {
-            if (clockTicker != null) clockTicker.stop();
+            dispose();
             engine.quit();
         });
+    }
+
+    /** Tandai controller dibuang + hentikan ticker/jam/executor (callback telat jadi no-op). */
+    private void dispose() {
+        disposed = true;
+        if (clockTicker != null) clockTicker.stop();
+        if (localClock != null) localClock.stop();
+        engineExec.shutdownNow();
     }
 
     private void startClockTicker() {
@@ -206,6 +269,11 @@ public class BotGameController {
                 selectedRow == null ? "-" : "(" + selectedRow + "," + selectedCol + ")"));
         if (gameOver) return;
         if (row < 0 || row >= 8 || col < 0 || col >= 8) return;
+
+        // Klik baru membatalkan hint yang sedang ditampilkan.
+        if (hintFromRow != null) {
+            clearHint();
+        }
 
         if (state.getCurrentTurn() != myColor || botThinking) {
             DebugLog.log("BOT-CLICK", "-> bukan giliran saya / bot berpikir, masuk premove");
@@ -252,11 +320,15 @@ public class BotGameController {
         // Langkah manual membatalkan sisa antrean premove (rencana lama tak berlaku lagi).
         premoveQueue.clear();
         clearSelection();
+        clearHint();
         redrawBoard();
         refreshStatus();
+        updateActionButtons();
         historyPanel.refresh(state.getMoveHistory());
 
-        if (!gameOver && state.getCurrentTurn() == botColor) {
+        if (gameOver) {
+            showGameOverDialog();
+        } else if (state.getCurrentTurn() == botColor) {
             requestBotMove();
         }
     }
@@ -294,10 +366,14 @@ public class BotGameController {
         DebugLog.log("BOT-PREMOVE", "eksekusi premove antrean: " + next.get()
                 + " | sisa antrean=" + premoveQueue.size());
         applyMove(next.get());
+        clearHint();
         redrawBoard();
         refreshStatus();
+        updateActionButtons();
         historyPanel.refresh(state.getMoveHistory());
-        if (!gameOver && state.getCurrentTurn() == botColor) {
+        if (gameOver) {
+            showGameOverDialog();
+        } else if (state.getCurrentTurn() == botColor) {
             requestBotMove();
         }
     }
@@ -328,8 +404,16 @@ public class BotGameController {
         return dialog.showAndWait().orElse(PieceType.QUEEN);
     }
 
-    /** Eksekusi langkah yang SUDAH divalidasi (dipanggil untuk langkah pemain maupun bot). */
+    /**
+     * Eksekusi langkah yang SUDAH divalidasi (dipanggil untuk langkah pemain
+     * maupun bot). Snapshot SEBELUM eksekusi selalu disimpan untuk undo -
+     * mencakup papan, giliran, status, riwayat, jam, dan data repetisi.
+     */
     private void applyMove(Move validatedMove) {
+        undoStack.push(state.createSnapshot());
+        while (undoStack.size() > MAX_UNDO_SNAPSHOTS) {
+            undoStack.removeFirst();
+        }
         PlayerColor mover = state.getCurrentTurn();
         MoveValidator.executeMove(state, validatedMove);
         if (localClock != null) {
@@ -345,13 +429,16 @@ public class BotGameController {
     /** Callback dari GameClock (thread Timer terpisah) ketika salah satu pemain kehabisan waktu. */
     private void handleTimeout(PlayerColor timedOutColor) {
         Platform.runLater(() -> {
-            if (gameOver) return;
+            if (disposed || gameOver) return;
             gameOver = true;
             state.setLoserColor(timedOutColor);
             state.setStatus(GameStatus.TIMEOUT);
+            clearHint();
+            premoveQueue.clear();
             redrawBoard();
             refreshStatus();
-            showGameOverAlert();
+            updateActionButtons();
+            showGameOverDialog();
         });
     }
 
@@ -362,50 +449,64 @@ public class BotGameController {
     private void requestBotMove() {
         botThinking = true;
         setThinkingIndicator(true);
+        updateActionButtons();
 
-        Thread engineThread = new Thread(() -> {
+        // Lewat engineExec (single-thread) supaya tidak pernah balapan dengan hint/eval/draw.
+        engineExec.submit(() -> {
+            String fen = FenConverter.toFen(state);
+            final String uciMove;
             try {
-                String fen = FenConverter.toFen(state);
-                String uciMove = engine.getBestMove(fen, difficulty.getMoveTimeMs());
-                Move raw = FenConverter.parseUciMove(uciMove, state);
-                Optional<Move> legal = MoveValidator.findLegalMove(state, raw);
-
-                if (legal.isEmpty()) {
-                    Platform.runLater(() -> {
-                        botThinking = false;
-                        setThinkingIndicator(false);
-                        showAlert(Alert.AlertType.ERROR, "Error Engine",
-                                "Stockfish mengirim langkah yang tidak dikenali validator kita: " + uciMove);
-                    });
-                    return;
-                }
-
-                Platform.runLater(() -> {
-                    applyMove(legal.get());
-                    botThinking = false;
-                    setThinkingIndicator(false);
-                    premoveQueue.refresh(state, myColor);
-                    redrawBoard();
-                    refreshStatus();
-                    historyPanel.refresh(state.getMoveHistory());
-
-                    if (gameOver) {
-                        showGameOverAlert();
-                    } else {
-                        trySubmitPremove();
-                    }
-                });
-
+                uciMove = engine.getBestMove(fen, difficulty.getMoveTimeMs());
             } catch (Exception e) {
                 Platform.runLater(() -> {
+                    if (disposed) return;
                     botThinking = false;
                     setThinkingIndicator(false);
+                    updateActionButtons();
                     showAlert(Alert.AlertType.ERROR, "Error Engine", "Gagal mendapat langkah dari Stockfish: " + e.getMessage());
                 });
+                return;
             }
-        }, "StockfishThinking");
-        engineThread.setDaemon(true);
-        engineThread.start();
+            Move raw = FenConverter.parseUciMove(uciMove, state);
+            Optional<Move> legal = MoveValidator.findLegalMove(state, raw);
+
+            if (legal.isEmpty()) {
+                Platform.runLater(() -> {
+                    if (disposed) return;
+                    botThinking = false;
+                    setThinkingIndicator(false);
+                    updateActionButtons();
+                    showAlert(Alert.AlertType.ERROR, "Error Engine",
+                            "Stockfish mengirim langkah yang tidak dikenali validator kita: " + uciMove);
+                });
+                return;
+            }
+
+            Platform.runLater(() -> {
+                if (disposed) return;
+                applyMove(legal.get());
+                botThinking = false;
+                setThinkingIndicator(false);
+                clearHint();
+                premoveQueue.refresh(state, myColor);
+                redrawBoard();
+                refreshStatus();
+                updateActionButtons();
+                historyPanel.refresh(state.getMoveHistory());
+
+                if (gameOver) {
+                    showGameOverDialog();
+                } else {
+                    // Premove dulu (langsung jalan lagi = engine sibuk lagi
+                    // dan requestEvalUpdate dilewati oleh guard-nya sendiri);
+                    // kalau antrean kosong, evaluasi posisi terbaru.
+                    trySubmitPremove();
+                    if (premoveQueue.isEmpty()) {
+                        requestEvalUpdate();
+                    }
+                }
+            });
+        });
     }
 
     private void setThinkingIndicator(boolean thinking) {
@@ -440,6 +541,16 @@ public class BotGameController {
         }
         boardView.render(state, hlRow, hlCol, hlHints, checkRow, checkCol);
         boardView.drawPremoveHighlights(premoveQueue.getEntries());
+        if (hintFromRow != null) {
+            boardView.drawHintHighlight(hintFromRow, hintFromCol, hintToRow, hintToCol);
+        }
+    }
+
+    /** Sinkronkan enable/disable tombol aksi dengan status game + kesibukan engine. */
+    private void updateActionButtons() {
+        if (hintButton == null || undoButton == null) return;
+        hintButton.setDisable(gameOver || botThinking || hintThinking);
+        undoButton.setDisable(botThinking || hintThinking || undoStack.isEmpty());
     }
 
     private void refreshStatus() {
@@ -501,10 +612,12 @@ public class BotGameController {
         state.setLoserColor(myColor);
         state.setStatus(GameStatus.RESIGNATION);
         premoveQueue.clear();
+        clearHint();
         if (localClock != null) localClock.stop();
         redrawBoard();
         refreshStatus();
-        showGameOverAlert();
+        updateActionButtons();
+        showGameOverDialog();
     }
 
     /**
@@ -514,46 +627,254 @@ public class BotGameController {
      * kalau posisi mendekati seimbang atau bot tertinggal, bot menerima.
      */
     private void onOfferDrawClicked() {
-        if (gameOver || botThinking) return;
+        if (gameOver || botThinking || hintThinking) return;
         statusLabel.setText("Menunggu keputusan Stockfish atas tawaran seri...");
 
-        Thread evalThread = new Thread(() -> {
+        String fen = FenConverter.toFen(state);
+        PlayerColor moverAtRequest = state.getCurrentTurn();
+        // Lewat engineExec supaya berurutan dengan request engine lain.
+        engineExec.submit(() -> {
+            final int evalForMover;
             try {
-                String fen = FenConverter.toFen(state);
-                int evalForMover = engine.evaluateCentipawns(fen, 500);
-                // UCI score selalu dari sudut pandang sisi yang lagi jalan di FEN -
-                // kalau yang jalan saat ini BUKAN bot, harus dibalik dulu.
-                int evalForBot = (state.getCurrentTurn() == botColor) ? evalForMover : -evalForMover;
-                boolean botAccepts = evalForBot < 150;
-
-                Platform.runLater(() -> {
-                    if (botAccepts) {
-                        gameOver = true;
-                        state.setStatus(GameStatus.DRAW);
-                        state.setDrawReason(DrawReason.AGREEMENT);
-                        if (localClock != null) localClock.stop();
-                        redrawBoard();
-                        refreshStatus();
-                        showGameOverAlert();
-                    } else {
-                        refreshStatus();
-                        showAlert(Alert.AlertType.INFORMATION, "Tawaran Seri",
-                                "Stockfish menolak tawaran seri - merasa posisinya lebih unggul.");
-                    }
-                });
+                evalForMover = engine.evaluateCentipawns(fen, 500);
             } catch (Exception e) {
                 Platform.runLater(() -> {
+                    if (disposed) return;
                     refreshStatus();
                     showAlert(Alert.AlertType.ERROR, "Error", "Gagal mengevaluasi posisi: " + e.getMessage());
                 });
+                return;
             }
-        }, "DrawEvalThread");
-        evalThread.setDaemon(true);
-        evalThread.start();
+            // UCI score selalu dari sudut pandang sisi yang lagi jalan di FEN -
+            // kalau yang jalan saat request BUKAN bot, harus dibalik dulu.
+            int evalForBot = (moverAtRequest == botColor) ? evalForMover : -evalForMover;
+            boolean botAccepts = evalForBot < 150;
+
+            Platform.runLater(() -> {
+                if (disposed || gameOver) return;
+                if (botAccepts) {
+                    gameOver = true;
+                    state.setStatus(GameStatus.DRAW);
+                    state.setDrawReason(DrawReason.AGREEMENT);
+                    if (localClock != null) localClock.stop();
+                    clearHint();
+                    premoveQueue.clear();
+                    redrawBoard();
+                    refreshStatus();
+                    updateActionButtons();
+                    showGameOverDialog();
+                } else {
+                    refreshStatus();
+                    showAlert(Alert.AlertType.INFORMATION, "Tawaran Seri",
+                            "Stockfish menolak tawaran seri - merasa posisinya lebih unggul.");
+                }
+            });
+        });
     }
 
-    private void showGameOverAlert() {
-        showAlert(Alert.AlertType.INFORMATION, "Permainan Selesai", describeEnding());
+    // =========================================================================
+    // Hint (saran langkah dari engine)
+    // =========================================================================
+
+    private void onHintClicked() {
+        if (gameOver || botThinking || hintThinking) return;
+        if (state.getCurrentTurn() != myColor) return;
+        hintThinking = true;
+        updateActionButtons();
+        statusLabel.setText("Meminta saran Stockfish...");
+
+        String fen = FenConverter.toFen(state);
+        // Lewat engineExec supaya berurutan; parse + validasi di FX thread
+        // supaya memakai posisi TERKINI (bukan snapshot saat request).
+        engineExec.submit(() -> {
+            final String uciMove;
+            try {
+                uciMove = engine.getBestMove(fen, 700);
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    if (disposed) return;
+                    hintThinking = false;
+                    updateActionButtons();
+                    refreshStatus();
+                    showAlert(Alert.AlertType.ERROR, "Error Engine", "Gagal meminta saran: " + e.getMessage());
+                });
+                return;
+            }
+            Platform.runLater(() -> {
+                if (disposed) return;
+                hintThinking = false;
+                updateActionButtons();
+                if (gameOver || state.getCurrentTurn() != myColor) {
+                    refreshStatus();
+                    return;
+                }
+                Move raw;
+                try {
+                    raw = FenConverter.parseUciMove(uciMove, state);
+                } catch (Exception e) {
+                    refreshStatus();
+                    showAlert(Alert.AlertType.INFORMATION, "Hint",
+                            "Saran kedaluwarsa (posisi berubah), coba lagi.");
+                    return;
+                }
+                Optional<Move> legal = MoveValidator.findLegalMove(state, raw);
+                if (legal.isEmpty()) {
+                    refreshStatus();
+                    showAlert(Alert.AlertType.INFORMATION, "Hint",
+                            "Saran kedaluwarsa (posisi berubah), coba lagi.");
+                    return;
+                }
+                Move hint = legal.get();
+                hintFromRow = hint.getFromRow();
+                hintFromCol = hint.getFromCol();
+                hintToRow = hint.getToRow();
+                hintToCol = hint.getToCol();
+                redrawBoard();
+                statusLabel.setText("💡 Saran: " + squareName(hintFromRow, hintFromCol)
+                        + " → " + squareName(hintToRow, hintToCol));
+            });
+        });
+    }
+
+    private void clearHint() {
+        hintFromRow = null;
+        hintFromCol = null;
+        hintToRow = null;
+        hintToCol = null;
+    }
+
+    /** Nama kotak aljabar, mis. (6,4) -> "e2". */
+    private static String squareName(int row, int col) {
+        return "" + (char) ('a' + col) + (8 - row);
+    }
+
+    // =========================================================================
+    // Eval bar (evaluasi posisi berkala saat engine menganggur)
+    // =========================================================================
+
+    /**
+     * Minta evaluasi posisi SAAT INI untuk eval bar. Dilewati kalau game
+     * over / engine sedang dipakai (bot berpikir, hint, atau eval lain
+     * jalan) - pemanggil berikutnya (setelah bot jalan / undo) akan
+     * meminta ulang dengan posisi yang lebih baru.
+     */
+    private void requestEvalUpdate() {
+        if (disposed || gameOver || botThinking || hintThinking || evalRunning) return;
+        evalRunning = true;
+        String fen = FenConverter.toFen(state);
+        PlayerColor moverAtRequest = state.getCurrentTurn();
+        engineExec.submit(() -> {
+            final int evalForMover;
+            try {
+                evalForMover = engine.evaluateCentipawns(fen, 400);
+            } catch (Exception ignored) {
+                Platform.runLater(() -> evalRunning = false);
+                return;
+            }
+            int evalWhite = (moverAtRequest == PlayerColor.WHITE) ? evalForMover : -evalForMover;
+            Platform.runLater(() -> {
+                evalRunning = false;
+                if (disposed || gameOver) return;
+                double prob = EvalBar.winProbability(evalWhite);
+                evalBar.update(prob, EvalBar.formatScore(evalWhite)
+                        + " · " + EvalBar.formatWinChance(prob));
+            });
+        });
+    }
+
+    // =========================================================================
+    // Undo/takeback (batalkan 1 langkah penuh: balasan bot + langkah pemain)
+    // =========================================================================
+
+    private void onUndoClicked() {
+        if (botThinking || hintThinking || undoStack.isEmpty()) return;
+
+        // Pop sampai giliran kembali ke pemain (normalnya 2 pop: balasan bot
+        // lalu langkah pemain; 1 pop kalau game over tepat setelah langkah
+        // pemain, mis. skakmat oleh pemain).
+        int pops = 0;
+        while (!undoStack.isEmpty() && pops < 2) {
+            state.restoreSnapshot(undoStack.pop());
+            pops++;
+            if (state.getCurrentTurn() == myColor) break;
+        }
+
+        gameOver = false;
+        state.setLoserColor(null);
+        state.setDrawReason(null);
+        clearHint();
+        clearSelection();
+        premoveQueue.clear();
+
+        // Jam dimulai ulang dari sisa waktu hasil restore.
+        if (localClock != null) localClock.stop();
+        localClock = state.getTimeControl().isUnlimited()
+                ? null
+                : new GameClock(state, this::handleTimeout);
+        if (localClock != null) localClock.startTurn();
+
+        historyPanel.refresh(state.getMoveHistory());
+        redrawBoard();
+        refreshStatus();
+        updateActionButtons();
+
+        if (state.getCurrentTurn() == botColor) {
+            // Kasus langka: history cuma 1 langkah (bot jalan duluan sebagai
+            // putih) - bot jalan ulang dari posisi awal.
+            requestBotMove();
+        } else {
+            requestEvalUpdate();
+        }
+    }
+
+    // =========================================================================
+    // Rematch (permainan baru, engine baru, pengaturan sama)
+    // =========================================================================
+
+    /** Dialog game-over dengan opsi main lagi. Pengganti showGameOverAlert(). */
+    private void showGameOverDialog() {
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.setTitle("Permainan Selesai");
+        alert.setHeaderText(null);
+        alert.setContentText(describeEnding() + "\n\nMain lagi dengan pengaturan yang sama?");
+        ButtonType rematchBtn = new ButtonType("Main Lagi", ButtonType.OK.getButtonData());
+        ButtonType closeBtn = new ButtonType("Tutup", ButtonType.CANCEL.getButtonData());
+        alert.getButtonTypes().setAll(rematchBtn, closeBtn);
+
+        Optional<ButtonType> result = alert.showAndWait();
+        if (result.isPresent() && result.get() == rematchBtn) {
+            startRematch();
+        }
+    }
+
+    /**
+     * Buang controller+engine lama, jalankan engine fresh (pola sama seperti
+     * BotSetupController.startBotGame), lalu buka permainan baru dengan
+     * difficulty/timer/warna yang sama. Engine fresh = tidak ada sisa
+     * request UCI lama yang bisa mengacaukan game baru.
+     */
+    private void startRematch() {
+        dispose();
+        statusLabel.setText("Menyiapkan permainan baru...");
+        Thread startThread = new Thread(() -> {
+            StockfishEngine freshEngine = new StockfishEngine();
+            try {
+                freshEngine.start(enginePath);
+                freshEngine.setElo(difficulty.getEloRating());
+                freshEngine.newGame();
+                Platform.runLater(() -> new BotGameController(
+                        stage, freshEngine, difficulty, timeControl, myColor, enginePath));
+            } catch (Exception e) {
+                freshEngine.quit();
+                Platform.runLater(() -> {
+                    showAlert(Alert.AlertType.ERROR, "Gagal Rematch",
+                            "Tidak bisa menjalankan ulang engine: " + e.getMessage());
+                    new MainMenuController(stage).show();
+                });
+            }
+        }, "StockfishRematch");
+        startThread.setDaemon(true);
+        startThread.start();
     }
 
     private void showAlert(Alert.AlertType type, String title, String content) {
@@ -567,8 +888,7 @@ public class BotGameController {
     private void confirmAndReturnToMenu() {
         // Game sudah selesai -> kembali biasa tanpa dihitung resign.
         if (gameOver) {
-            if (clockTicker != null) clockTicker.stop();
-            if (localClock != null) localClock.stop();
+            dispose();
             engine.quit();
             new MainMenuController(stage).show();
             return;
@@ -585,8 +905,7 @@ public class BotGameController {
             gameOver = true;
             state.setLoserColor(myColor);
             state.setStatus(GameStatus.RESIGNATION);
-            if (clockTicker != null) clockTicker.stop();
-            if (localClock != null) localClock.stop();
+            dispose();
             engine.quit();
             new MainMenuController(stage).show();
         }

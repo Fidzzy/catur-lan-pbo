@@ -100,6 +100,9 @@ public class ClientHandler implements Runnable {
             case DRAW_OFFER -> handleDrawOffer();
             case DRAW_ACCEPT -> handleDrawAccept();
             case DRAW_DECLINE -> handleDrawDecline();
+            case REMATCH_OFFER -> handleRematchOffer();
+            case REMATCH_ACCEPT -> handleRematchAccept();
+            case REMATCH_DECLINE -> handleRematchDecline();
             case DISCONNECT -> connected = false;
             default -> log("Tipe pesan tak terduga dari client: " + message.getType());
         }
@@ -169,6 +172,26 @@ public class ClientHandler implements Runnable {
     private void handleDrawDecline() {
         server.relayDrawDecline(this);
         log(assignedColor + " menolak tawaran seri.");
+    }
+
+    /** Ajakan main lagi (rematch). Hanya valid setelah game over - dicek di GameServer. */
+    private void handleRematchOffer() {
+        server.relayRematchOffer(this);
+        log(assignedColor + " mengajak rematch.");
+    }
+
+    /** Lawan menerima ajakan rematch yang sedang pending. */
+    private void handleRematchAccept() {
+        boolean started = server.acceptRematchIfPending(assignedColor);
+        if (started) {
+            log("Rematch dimulai (diterima oleh " + assignedColor + ").");
+        }
+    }
+
+    /** Lawan menolak ajakan rematch. Server meneruskan notifikasi penolakan ke pengajak. */
+    private void handleRematchDecline() {
+        server.relayRematchDecline(this);
+        log(assignedColor + " menolak ajakan rematch.");
     }
 
     /**

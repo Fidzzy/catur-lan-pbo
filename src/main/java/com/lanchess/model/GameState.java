@@ -141,6 +141,61 @@ public class GameState implements Serializable {
         moveHistory.add(move);
     }
 
+    /**
+     * Penghitung kemunculan posisi (lihat recordCurrentPositionAndGetCount).
+     * Diekspos agar GameStateSnapshot bisa menyalinnya untuk undo -
+     * JANGAN dimutasi langsung dari luar.
+     */
+    public Map<String, Integer> getPositionCounts() {
+        return positionCounts;
+    }
+
+    /**
+     * Kembalikan state ke posisi awal permainan BARU dengan TimeControl yang
+     * SAMA (jam di-reset ke nilai awal preset). Dipakai rematch LAN di
+     * server (GameServer.startRematch) tanpa membuat objek GameState baru -
+     * karena ClientHandler/GameClock memegang referensi objek ini.
+     */
+    public void reset() {
+        this.board = BoardFactory.createStandardBoard();
+        this.currentTurn = PlayerColor.WHITE; // WHITE selalu jalan duluan
+        this.status = GameStatus.PLAYING;
+        this.moveHistory.clear();
+        this.setTimeControl(this.timeControl); // reset kedua jam ke awal
+        this.loserColor = null;
+        this.drawReason = null;
+        this.positionCounts.clear();
+        recordCurrentPositionAndGetCount(); // posisi awal ikut dihitung lagi
+    }
+
+    /**
+     * Bekukan titik posisi saat ini untuk undo/takeback.
+     * @see GameStateSnapshot
+     */
+    public GameStateSnapshot createSnapshot() {
+        return new GameStateSnapshot(this);
+    }
+
+    /**
+     * Kembalikan seluruh state dari snapshot (hasil createSnapshot yang
+     * diambil SEBELUM langkah yang mau dibatalkan). Snapshot dianggap
+     * terpakai setelah ini - jangan dipakai dua kali.
+     */
+    public void restoreSnapshot(GameStateSnapshot snapshot) {
+        this.board = snapshot.board;
+        this.currentTurn = snapshot.currentTurn;
+        this.status = snapshot.status;
+        this.moveHistory.clear();
+        this.moveHistory.addAll(snapshot.moveHistory);
+        this.timeControl = snapshot.timeControl;
+        this.whiteMillisRemaining = snapshot.whiteMillisRemaining;
+        this.blackMillisRemaining = snapshot.blackMillisRemaining;
+        this.loserColor = snapshot.loserColor;
+        this.drawReason = snapshot.drawReason;
+        this.positionCounts.clear();
+        this.positionCounts.putAll(snapshot.positionCounts);
+    }
+
     // ---------- Jam catur ----------
 
     /** Set kontrol waktu DAN reset sisa waktu kedua pemain ke waktu awal preset ini. */
