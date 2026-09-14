@@ -63,12 +63,8 @@ public class BotGameController {
     private boolean gameOver = false;
     private boolean botThinking = false;
 
-    // --- Premove (antrikan langkah selagi bot berpikir) ---
-    private Integer premoveFromRow;
-    private Integer premoveFromCol;
-    private Integer premoveToRow;
-    private Integer premoveToCol;
-    private PieceType premovePromotionType;
+    // --- Premove: antrean tak terbatas selagi bot berpikir (logika di PremoveQueue) ---
+    private final PremoveQueue premoveQueue = new PremoveQueue();
 
     private final BoardView boardView = new BoardView();
     private final Label statusLabel = new Label();
@@ -142,6 +138,13 @@ public class BotGameController {
         BorderPane.setAlignment(topBox, Pos.CENTER);
 
         boardView.setOnMouseClicked(event -> {
+            // Klik-kanan = buang seluruh antrean premove.
+            if (event.getButton() == MouseButton.SECONDARY) {
+                premoveQueue.clear();
+                redrawBoard();
+                refreshStatus();
+                return;
+            }
             if (event.getButton() != MouseButton.PRIMARY) return;
             int row = boardView.pixelToRow(event.getY());
             int col = boardView.pixelToCol(event.getX());
@@ -210,10 +213,9 @@ public class BotGameController {
             return;
         }
 
-        // Hanya field premove yang dibersihkan, JANGAN sentuh seleksi!
-        // (BUG LAMA: clearPremove() ikut menghapus selectedRow & currentLegalMoves
-        //  sehingga klik tujuan tidak pernah cocok - tidak ada bidak bisa jalan.)
-        clearPremoveKeepSelection();
+        // Giliran kita: seleksi pending premove tidak relevan di sini
+        // (antrean tetap tersimpan, hanya seleksi pending yang dibersihkan).
+        premoveQueue.clearSelection();
         Piece clicked = state.getPieceAt(row, col);
 
         if (selectedRow == null) {
@@ -247,6 +249,8 @@ public class BotGameController {
 
         DebugLog.log("BOT-CLICK", "-> EKSEKUSI lokal: " + move);
         applyMove(move);
+        // Langkah manual membatalkan sisa antrean premove (rencana lama tak berlaku lagi).
+        premoveQueue.clear();
         clearSelection();
         redrawBoard();
         refreshStatus();
@@ -257,155 +261,44 @@ public class BotGameController {
         }
     }
 
-    /** Alur klik selagi giliran bot / bot sedang berpikir - antrikan sebagai premove. */
+    /**
+     * Alur klik selagi giliran bot / bot sedang berpikir - diteruskan ke
+     * antrean premove tak terbatas (boleh banyak; klik asal premove terakhir
+     * = undo). Seleksi normal tidak disentuh di sini.
+     */
     private void handlePremoveClick(int row, int col) {
         if (row < 0 || row >= 8 || col < 0 || col >= 8) return;
-        Piece clicked = state.getPieceAt(row, col);
-
-        // Tahap 1: belum ada bidak sumber premove -> klik harus ke bidak sendiri.
-        // (BUG LAMA: klik pertama di sini tidak pernah menyimpan premoveFromRow/Col,
-        //  sehingga klik kedua selalu masuk lagi ke cabang ini dan premove tidak
-        //  pernah terbentuk - bidak terlihat bisa dipilih tapi tidak bisa jalan.)
-        if (premoveFromRow == null) {
-            if (clicked != null && clicked.getColor() == myColor) {
-                premoveFromRow = row;
-                premoveFromCol = col;
-                selectedRow = row;
-                selectedCol = col;
-                currentLegalMoves = MoveValidator.getLegalMoves(state, row, col);
-            } else {
-                clearSelection();
-            }
-            redrawBoard();
-            return;
-        }
-
-        // Tahap 1b: sumber sudah dipilih tapi tujuan belum.
-        if (premoveToRow == null) {
-            // Klik ulang sumber -> batalkan premove
-            if (row == premoveFromRow && col == premoveFromCol) {
-                clearPremove();
-                redrawBoard();
-                return;
-            }
-            // Klik kotak tujuan yang legal -> KUNCI premove (sumber + tujuan lengkap)
-            boolean validTarget = currentLegalMoves.stream()
-                    .anyMatch(m -> m.getToRow() == row && m.getToCol() == col);
-            if (validTarget) {
-                premoveToRow = row;
-                premoveToCol = col;
-                Piece movingPiece = state.getPieceAt(premoveFromRow, premoveFromCol);
-                boolean isPromotionCandidate = movingPiece != null && movingPiece.getType() == PieceType.PAWN
-                        && (row == 0 || row == 7);
-                premovePromotionType = isPromotionCandidate ? askPromotionChoice() : null;
-                clearSelection();
-                redrawBoard();
-                return;
-            }
-            // Klik bidak sendiri yang lain -> pindahkan sumber premove ke situ
-            if (clicked != null && clicked.getColor() == myColor) {
-                premoveFromRow = row;
-                premoveFromCol = col;
-                selectedRow = row;
-                selectedCol = col;
-                currentLegalMoves = MoveValidator.getLegalMoves(state, row, col);
-                redrawBoard();
-                return;
-            }
-            // Klik kotak lain yang bukan target -> batalkan
-            clearPremove();
-            redrawBoard();
-            return;
-        }
-
-        // Tahap 2: premove lengkap, klik ulang sumber membatalkan
-        if (row == premoveFromRow && col == premoveFromCol) {
-            clearPremove();
-            redrawBoard();
-            return;
-        }
-
-        boolean isValidTarget = currentLegalMoves.stream()
-                .anyMatch(m -> m.getToRow() == row && m.getToCol() == col);
-
-        if (!isValidTarget) {
-            if (clicked != null && clicked.getColor() == myColor) {
-                premoveFromRow = row;
-                premoveFromCol = col;
-                selectedRow = row;
-                selectedCol = col;
-                currentLegalMoves = MoveValidator.getLegalMoves(state, row, col);
-                premoveToRow = null;
-                premoveToCol = null;
-                premovePromotionType = null;
-                redrawBoard();
-            }
-            return;
-        }
-
-        premoveToRow = row;
-        premoveToCol = col;
-
-        Piece movingPiece = state.getPieceAt(premoveFromRow, premoveFromCol);
-        boolean isPromotionCandidate = movingPiece != null && movingPiece.getType() == PieceType.PAWN
-                && (row == 0 || row == 7);
-        premovePromotionType = isPromotionCandidate ? askPromotionChoice() : null;
-
         clearSelection();
+        PremoveQueue.ClickOutcome outcome =
+                premoveQueue.handleClick(state, myColor, row, col, this::askPromotionChoice);
+        DebugLog.log("BOT-PREMOVE", "klik (%d,%d) -> %s | antrean=%d".formatted(
+                row, col, outcome, premoveQueue.size()));
         redrawBoard();
-    }
-
-    private void clearPremove() {
-        premoveFromRow = null;
-        premoveFromCol = null;
-        premoveToRow = null;
-        premoveToCol = null;
-        premovePromotionType = null;
-        clearSelection();
+        refreshStatus();
     }
 
     /**
-     * Batalkan premove tersisa TANPA menghapus seleksi/highlight saat ini.
-     * Dipakai di awal alur klik normal (giliran kita) - seleksi &amp; daftar
-     * legal moves harus tetap hidup supaya klik tujuan bisa dicocokkan.
+     * Jalankan entri terdepan antrean setelah bot selesai jalan (satu entri
+     * per giliran; giliran berikutnya memicu pemanggilan berikutnya). Kalau
+     * entri tidak legal di posisi nyata (kotak terisi / raja akan skak),
+     * seluruh sisa antrean berhenti (dibuang) diam-diam.
      */
-    private void clearPremoveKeepSelection() {
-        premoveFromRow = null;
-        premoveFromCol = null;
-        premoveToRow = null;
-        premoveToCol = null;
-        premovePromotionType = null;
-    }
-
-    /** Coba kirim premove yang sedang diantrikan setelah bot selesai jalan. Buang diam-diam kalau sudah ilegal. */
     private void trySubmitPremove() {
-        if (premoveFromRow == null || gameOver || state.getCurrentTurn() != myColor) return;
-        // Sumber tanpa tujuan (baru tahap pilih bidak) bukan premove yang bisa dikirim
-        if (premoveToRow == null) {
-            clearPremove();
-            return;
-        }
-
-        List<Move> nowLegal = MoveValidator.getLegalMoves(state, premoveFromRow, premoveFromCol);
-        Optional<Move> stillValid = nowLegal.stream()
-                .filter(m -> m.getToRow() == premoveToRow && m.getToCol() == premoveToCol)
-                .findFirst();
-
-        if (stillValid.isPresent()) {
-            Move move = stillValid.get();
-            if (move.isPromotion()) {
-                move.setPromotionType(premovePromotionType != null ? premovePromotionType : PieceType.QUEEN);
-            }
-            clearPremove();
-            applyMove(move);
+        if (gameOver || botThinking || state.getCurrentTurn() != myColor) return;
+        Optional<Move> next = premoveQueue.pollHead(state, myColor);
+        if (next.isEmpty()) {
             redrawBoard();
             refreshStatus();
-            historyPanel.refresh(state.getMoveHistory());
-            if (!gameOver && state.getCurrentTurn() == botColor) {
-                requestBotMove();
-            }
-        } else {
-            clearPremove();
+            return;
+        }
+        DebugLog.log("BOT-PREMOVE", "eksekusi premove antrean: " + next.get()
+                + " | sisa antrean=" + premoveQueue.size());
+        applyMove(next.get());
+        redrawBoard();
+        refreshStatus();
+        historyPanel.refresh(state.getMoveHistory());
+        if (!gameOver && state.getCurrentTurn() == botColor) {
+            requestBotMove();
         }
     }
 
@@ -491,6 +384,7 @@ public class BotGameController {
                     applyMove(legal.get());
                     botThinking = false;
                     setThinkingIndicator(false);
+                    premoveQueue.refresh(state, myColor);
                     redrawBoard();
                     refreshStatus();
                     historyPanel.refresh(state.getMoveHistory());
@@ -534,12 +428,18 @@ public class BotGameController {
             } catch (IllegalStateException ignored) {
             }
         }
-        boardView.render(state, selectedRow, selectedCol, currentLegalMoves, checkRow, checkCol);
-        // Premove baru di-highlight kalau sumber DAN tujuan sudah lengkap
-        if (premoveFromRow != null && premoveToRow != null
-                && premoveFromCol != null && premoveToCol != null) {
-            boardView.drawPremoveHighlight(premoveFromRow, premoveFromCol, premoveToRow, premoveToCol);
+        // Seleksi pending premove (jika ada) ditampilkan sebagai highlight kuning biasa;
+        // entri antrean yang terkunci digambar dengan highlight biru + nomor urut.
+        Integer hlRow = selectedRow;
+        Integer hlCol = selectedCol;
+        List<Move> hlHints = currentLegalMoves;
+        if (premoveQueue.hasSelection()) {
+            hlRow = premoveQueue.getSelRow();
+            hlCol = premoveQueue.getSelCol();
+            hlHints = premoveQueue.getSelLegal();
         }
+        boardView.render(state, hlRow, hlCol, hlHints, checkRow, checkCol);
+        boardView.drawPremoveHighlights(premoveQueue.getEntries());
     }
 
     private void refreshStatus() {
@@ -549,9 +449,11 @@ public class BotGameController {
     private String describeStatus() {
         if (gameOver) return describeEnding();
         String turnText = state.getCurrentTurn() == myColor ? "Giliranmu" : "Giliran Stockfish";
+        String premoveNote = premoveQueue.isEmpty() ? ""
+                : " (" + premoveQueue.size() + " premove diantrikan)";
         return switch (state.getStatus()) {
-            case CHECK -> turnText + " - SKAK!";
-            case PLAYING -> turnText;
+            case CHECK -> turnText + " - SKAK!" + premoveNote;
+            case PLAYING -> turnText + premoveNote;
             default -> state.getStatus().toString();
         };
     }
@@ -598,6 +500,7 @@ public class BotGameController {
         gameOver = true;
         state.setLoserColor(myColor);
         state.setStatus(GameStatus.RESIGNATION);
+        premoveQueue.clear();
         if (localClock != null) localClock.stop();
         redrawBoard();
         refreshStatus();
@@ -662,12 +565,26 @@ public class BotGameController {
     }
 
     private void confirmAndReturnToMenu() {
+        // Game sudah selesai -> kembali biasa tanpa dihitung resign.
+        if (gameOver) {
+            if (clockTicker != null) clockTicker.stop();
+            if (localClock != null) localClock.stop();
+            engine.quit();
+            new MainMenuController(stage).show();
+            return;
+        }
+
         Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
-        confirm.setTitle("Kembali ke Menu");
+        confirm.setTitle("Kembali ke Menu Utama");
         confirm.setHeaderText(null);
-        confirm.setContentText("Permainan yang sedang berjalan akan dihentikan. Lanjutkan?");
+        confirm.setContentText("Permainan masih berlangsung. Kembali ke menu utama "
+                + "akan dihitung sebagai resign (kalah). Lanjutkan?");
         Optional<javafx.scene.control.ButtonType> result = confirm.showAndWait();
         if (result.isPresent() && result.get() == javafx.scene.control.ButtonType.OK) {
+            // Yang menekan dihitung resign: catat kekalahan sebelum keluar.
+            gameOver = true;
+            state.setLoserColor(myColor);
+            state.setStatus(GameStatus.RESIGNATION);
             if (clockTicker != null) clockTicker.stop();
             if (localClock != null) localClock.stop();
             engine.quit();

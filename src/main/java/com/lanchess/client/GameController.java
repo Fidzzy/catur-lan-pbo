@@ -53,12 +53,14 @@ import java.util.Optional;
  * tiap detik). Baseline interpolasi (lastStateReceivedAtMillis) di-reset
  * setiap kali STATE_UPDATE baru diterima.
  *
- * PREMOVE: kalau pemain klik papan SAAT BUKAN gilirannya, langkah itu
- * diantrikan (bukan langsung ditolak/diabaikan). Begitu STATE_UPDATE
- * berikutnya menunjukkan giliran sudah berpindah ke pemain ini, premove
- * dicoba dikirim otomatis - kalau ternyata sudah tidak legal lagi (posisi
- * berubah gara-gara langkah lawan), premove dibuang diam-diam tanpa error.
- * Ini murni fitur UX client-side; server tetap validasi penuh seperti biasa.
+  * PREMOVE (antrean tak terbatas): kalau pemain klik papan SAAT BUKAN
+  * gilirannya, tiap langkah valid dikunci ke PremoveQueue (boleh banyak,
+  * dipilih di atas posisi proyeksi). Setiap kali giliran tiba, entri
+  * terdepan dicoba dikirim otomatis - kalau posisi nyata sudah berubah
+  * (kotak asal tak berisi bidak sendiri / tujuan terhalang / raja akan
+  * skak), SELURUH sisa antrean dibuang (berhenti). Klik kotak asal premove
+  * terakhir = undo premove itu; klik-kanan = buang semua.
+  * Ini murni fitur UX client-side; server tetap validasi penuh seperti biasa.
  */
 public class GameController {
 
@@ -73,12 +75,8 @@ public class GameController {
     private boolean gameOver = false;
     private long lastStateReceivedAtMillis = System.currentTimeMillis();
 
-    // --- Premove ---
-    private Integer premoveFromRow;
-    private Integer premoveFromCol;
-    private Integer premoveToRow;
-    private Integer premoveToCol;
-    private PieceType premovePromotionType;
+    // --- Premove: antrean tak terbatas (logika di PremoveQueue, bukan field satu-langkah lagi) ---
+    private final PremoveQueue premoveQueue = new PremoveQueue();
 
     private final BoardView boardView = new BoardView();
     private final Label statusLabel = new Label();
@@ -123,7 +121,11 @@ public class GameController {
         offerDrawButton.getStyleClass().add("pill-button-secondary");
         offerDrawButton.setOnAction(e -> onOfferDrawClicked());
 
-        HBox actionRow = new HBox(8, resignButton, offerDrawButton);
+        Button backButton = new Button("Kembali ke Menu Utama");
+        backButton.getStyleClass().add("pill-button-secondary");
+        backButton.setOnAction(e -> confirmAndReturnToMenu());
+
+        HBox actionRow = new HBox(8, resignButton, offerDrawButton, backButton);
         actionRow.setAlignment(Pos.CENTER);
 
         VBox topBox = new VBox(6, colorLabel, clockPanel, statusLabel, actionRow);
@@ -133,7 +135,7 @@ public class GameController {
 
         boardView.setOnMouseClicked(event -> {
             if (event.getButton() == MouseButton.SECONDARY) {
-                clearPremove();
+                premoveQueue.clear();
                 redrawBoard();
                 return;
             }
@@ -162,6 +164,16 @@ public class GameController {
 
         stage.setOnCloseRequest(e -> {
             if (clockTicker != null) clockTicker.stop();
+            // Tutup window (X) saat permainan berlangsung juga dihitung resign,
+            // supaya lawan tetap mendapat kemenangan, bukan sekadar disconnect.
+            if (isGameActive()) {
+                try {
+                    client.sendMessage(new Message(MessageType.RESIGN, null, myColor.name()));
+                } catch (Exception ignored) {
+                }
+            }
+            client.setOnDisconnected(null);
+            client.disconnect();
         });
     }
 
@@ -244,14 +256,9 @@ public class GameController {
             return;
         }
 
-        // Kalau ada premove tersisa dari sebelumnya (jarang terjadi, tapi jaga-jaga) dan sekarang
-        // ternyata giliran kita, batalkan dulu supaya tidak membingungkan alur klik normal.
-        // PENTING: hanya field premove yang dibersihkan, JANGAN sentuh seleksi!
-        // (BUG LAMA: clearPremove() ikut memanggil clearSelection() sehingga selectedRow dan
-        //  currentLegalMoves selalu kosong di setiap klik - akibatnya klik tujuan TIDAK PERNAH
-        //  cocok dengan legal moves dan TIDAK ADA bidak yang bisa jalan. Terbukti via click-debug.log:
-        //  klik tujuan selalu jatuh ke "coba seleksi ulang" dengan kotak kosong.)
-        clearPremoveKeepSelection();
+        // Giliran kita: seleksi pending premove tidak relevan di sini
+        // (antrean tetap tersimpan, hanya seleksi pending yang dibersihkan).
+        premoveQueue.clearSelection();
 
         Piece clicked = state.getPieceAt(row, col);
 
@@ -287,6 +294,8 @@ public class GameController {
 
         DebugLog.log("LAN-CLICK", "-> KIRIM MOVE ke server: " + move);
         client.sendMessage(new Message(MessageType.MOVE, move, myColor.name()));
+        // Langkah manual membatalkan sisa antrean premove (rencana lama tak berlaku lagi).
+        premoveQueue.clear();
         clearSelection();
         redrawBoard();
     }
@@ -296,105 +305,20 @@ public class GameController {
         return piece.getColor() + " " + piece.getType() + " (internal " + piece.getRow() + "," + piece.getCol() + ")";
     }
 
-    /** Alur klik saat BUKAN giliran kita - pilih bidak sendiri, lalu klik tujuan untuk mengantrikan premove. */
+    /**
+     * Alur klik saat BUKAN giliran kita - diteruskan ke antrean premove tak
+     * terbatas (pilih bidak -> kunci tujuan, boleh berulang; klik asal
+     * premove terakhir = undo). Seleksi normal tidak disentuh di sini.
+     */
     private void handlePremoveClick(int row, int col) {
         if (row < 0 || row >= 8 || col < 0 || col >= 8) return;
-        Piece clicked = state.getPieceAt(row, col);
-
-        // Tahap 1: belum ada bidak sumber premove -> klik harus ke bidak sendiri.
-        // (BUG LAMA: klik pertama di sini tidak pernah menyimpan premoveFromRow/Col,
-        //  sehingga klik kedua selalu masuk lagi ke cabang ini dan premove tidak
-        //  pernah terbentuk - bidak terlihat bisa dipilih tapi tidak bisa jalan.)
-        if (premoveFromRow == null) {
-            if (clicked != null && clicked.getColor() == myColor) {
-                premoveFromRow = row;
-                premoveFromCol = col;
-                selectedRow = row;
-                selectedCol = col;
-                // Preview legal move SEKARANG (posisi saat ini) - hanya perkiraan, posisi
-                // bisa berubah begitu lawan jalan sebelum giliran kita benar-benar tiba.
-                currentLegalMoves = MoveValidator.getLegalMoves(state, row, col);
-            } else {
-                clearSelection();
-            }
-            redrawBoard();
-            return;
-        }
-
-        // Tahap 1b: sumber sudah dipilih tapi tujuan belum.
-        if (premoveToRow == null) {
-            // Klik ulang sumber -> batalkan premove
-            if (row == premoveFromRow && col == premoveFromCol) {
-                clearPremove();
-                redrawBoard();
-                return;
-            }
-            // Klik kotak tujuan yang legal -> KUNCI premove (sumber + tujuan lengkap)
-            boolean validTarget = currentLegalMoves.stream()
-                    .anyMatch(m -> m.getToRow() == row && m.getToCol() == col);
-            if (validTarget) {
-                premoveToRow = row;
-                premoveToCol = col;
-                Piece movingPiece = state.getPieceAt(premoveFromRow, premoveFromCol);
-                boolean isPromotionCandidate = movingPiece != null && movingPiece.getType() == PieceType.PAWN
-                        && (row == 0 || row == 7);
-                premovePromotionType = isPromotionCandidate ? askPromotionChoice() : null;
-                clearSelection();
-                redrawBoard();
-                return;
-            }
-            // Klik bidak sendiri yang lain -> pindahkan sumber premove ke situ
-            if (clicked != null && clicked.getColor() == myColor) {
-                premoveFromRow = row;
-                premoveFromCol = col;
-                selectedRow = row;
-                selectedCol = col;
-                currentLegalMoves = MoveValidator.getLegalMoves(state, row, col);
-                redrawBoard();
-                return;
-            }
-            // Klik kotak lain yang bukan target -> batalkan
-            clearPremove();
-            redrawBoard();
-            return;
-        }
-
-        // Tahap 2: premove lengkap, klik ulang membatalkan
-        if (row == premoveFromRow && col == premoveFromCol) {
-            clearPremove();
-            redrawBoard();
-            return;
-        }
-
-        boolean isValidTarget = currentLegalMoves.stream()
-                .anyMatch(m -> m.getToRow() == row && m.getToCol() == col);
-
-        if (!isValidTarget) {
-            // Klik kotak lain milik sendiri -> pindah sumber premove ke situ
-            if (clicked != null && clicked.getColor() == myColor) {
-                premoveFromRow = row;
-                premoveFromCol = col;
-                selectedRow = row;
-                selectedCol = col;
-                currentLegalMoves = MoveValidator.getLegalMoves(state, row, col);
-                premoveToRow = null;
-                premoveToCol = null;
-                premovePromotionType = null;
-                redrawBoard();
-            }
-            return;
-        }
-
-        premoveToRow = row;
-        premoveToCol = col;
-
-        Piece movingPiece = state.getPieceAt(premoveFromRow, premoveFromCol);
-        boolean isPromotionCandidate = movingPiece != null && movingPiece.getType() == PieceType.PAWN
-                && (row == 0 || row == 7);
-        premovePromotionType = isPromotionCandidate ? askPromotionChoice() : null;
-
         clearSelection();
+        PremoveQueue.ClickOutcome outcome =
+                premoveQueue.handleClick(state, myColor, row, col, this::askPromotionChoice);
+        DebugLog.log("LAN-PREMOVE", "klik (%d,%d) -> %s | antrean=%d".formatted(
+                row, col, outcome, premoveQueue.size()));
         redrawBoard();
+        refreshUiState();
     }
 
     private void trySelect(int row, int col, Piece clicked) {
@@ -414,53 +338,23 @@ public class GameController {
         currentLegalMoves = List.of();
     }
 
-    private void clearPremove() {
-        premoveFromRow = null;
-        premoveFromCol = null;
-        premoveToRow = null;
-        premoveToCol = null;
-        premovePromotionType = null;
-        clearSelection();
-    }
-
-    /**
-     * Batalkan premove tersisa TANPA menghapus seleksi/highlight saat ini.
-     * Dipakai di awal alur klik normal (giliran kita) - seleksi &amp; daftar
-     * legal moves harus tetap hidup supaya klik tujuan bisa dicocokkan.
-     */
-    private void clearPremoveKeepSelection() {
-        premoveFromRow = null;
-        premoveFromCol = null;
-        premoveToRow = null;
-        premoveToCol = null;
-        premovePromotionType = null;
-    }
-
     /**
      * Dipanggil setiap kali STATE_UPDATE baru diterima DAN sekarang giliran
-     * kita. Coba kirim premove yang sedang diantrikan (kalau ada); kalau
-     * sudah tidak legal lagi di posisi terbaru, buang diam-diam.
+     * kita. Entri terdepan antrean dicoba dikirim; kalau tidak legal di
+     * posisi nyata (kotak terisi / raja akan skak), seluruh sisa antrean
+     * berhenti (dibuang) diam-diam tanpa error.
      */
     private void trySubmitPremove() {
-        // Sumber tanpa tujuan (baru tahap pilih bidak) bukan premove yang bisa dikirim
-        if (premoveFromRow == null || premoveToRow == null) {
-            clearPremove();
-            return;
-        }
-
-        List<Move> nowLegal = MoveValidator.getLegalMoves(state, premoveFromRow, premoveFromCol);
-        Optional<Move> stillValid = nowLegal.stream()
-                .filter(m -> m.getToRow() == premoveToRow && m.getToCol() == premoveToCol)
-                .findFirst();
-
-        if (stillValid.isPresent()) {
-            Move move = stillValid.get();
-            if (move.isPromotion()) {
-                move.setPromotionType(premovePromotionType != null ? premovePromotionType : PieceType.QUEEN);
-            }
+        if (gameOver || state.getCurrentTurn() != myColor) return;
+        Optional<Move> next = premoveQueue.pollHead(state, myColor);
+        if (next.isPresent()) {
+            Move move = next.get();
+            DebugLog.log("LAN-PREMOVE", "eksekusi premove antrean: " + move
+                    + " | sisa antrean=" + premoveQueue.size());
             client.sendMessage(new Message(MessageType.MOVE, move, myColor.name()));
         }
-        clearPremove();
+        redrawBoard();
+        refreshUiState();
     }
 
     private PieceType askPromotionChoice() {
@@ -526,6 +420,7 @@ public class GameController {
                     this.state = newState;
                     this.lastStateReceivedAtMillis = System.currentTimeMillis();
                     clearSelection();
+                    premoveQueue.refresh(state, myColor);
                     refreshUiState();
                     redrawBoard();
                     historyPanel.refresh(state.getMoveHistory());
@@ -557,7 +452,7 @@ public class GameController {
                 GameStatus finalStatus = message.getPayloadAs(GameStatus.class);
                 Platform.runLater(() -> {
                     gameOver = true;
-                    clearPremove();
+                    premoveQueue.clear();
                     showAlert(Alert.AlertType.INFORMATION, "Permainan Selesai", describeEnding(finalStatus));
                 });
             }
@@ -619,13 +514,18 @@ public class GameController {
             } catch (IllegalStateException ignored) {
             }
         }
-        boardView.render(state, selectedRow, selectedCol, currentLegalMoves, checkRow, checkCol);
-        // Premove baru di-highlight kalau sumber DAN tujuan sudah lengkap
-        // (sumber saja = tahap seleksi, cukup highlight kuning biasa dari render()).
-        if (premoveFromRow != null && premoveToRow != null
-                && premoveFromCol != null && premoveToCol != null) {
-            boardView.drawPremoveHighlight(premoveFromRow, premoveFromCol, premoveToRow, premoveToCol);
+        // Seleksi pending premove (jika ada) ditampilkan sebagai highlight kuning biasa;
+        // entri antrean yang terkunci digambar dengan highlight biru + nomor urut.
+        Integer hlRow = selectedRow;
+        Integer hlCol = selectedCol;
+        List<Move> hlHints = currentLegalMoves;
+        if (premoveQueue.hasSelection()) {
+            hlRow = premoveQueue.getSelRow();
+            hlCol = premoveQueue.getSelCol();
+            hlHints = premoveQueue.getSelLegal();
         }
+        boardView.render(state, hlRow, hlCol, hlHints, checkRow, checkCol);
+        boardView.drawPremoveHighlights(premoveQueue.getEntries());
     }
 
     private void refreshUiState() {
@@ -636,7 +536,8 @@ public class GameController {
     private String describeStatus() {
         if (gameOver) return "Permainan telah selesai.";
         String turnText = state.getCurrentTurn() == myColor ? "Giliranmu" : "Menunggu lawan";
-        String premoveNote = (premoveFromRow != null) ? " (premove diantrikan)" : "";
+        String premoveNote = premoveQueue.isEmpty() ? ""
+                : " (" + premoveQueue.size() + " premove diantrikan)";
         return switch (state.getStatus()) {
             case WAITING_FOR_PLAYER -> "Menunggu pemain kedua...";
             case CHECK -> turnText + " - SKAK!";
@@ -662,5 +563,59 @@ public class GameController {
         showAlert(Alert.AlertType.ERROR, title, content);
         if (clockTicker != null) clockTicker.stop();
         new MainMenuController(stage).show();
+    }
+
+    /**
+     * Opsi "Kembali ke Menu Utama" di dalam permainan. Kalau permainan masih
+     * berlangsung (status PLAYING/CHECK dan belum game-over), yang menekan
+     * dihitung RESIGN: kirim RESIGN ke server dulu supaya lawan dinyatakan
+     * menang via broadcast END, baru putus koneksi & kembali ke menu.
+     * Kalau game sudah selesai / masih menunggu lawan, langsung kembali
+     * tanpa mengirim RESIGN.
+     */
+    private void confirmAndReturnToMenu() {
+        if (isGameActive()) {
+            Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+            confirm.setTitle("Kembali ke Menu Utama");
+            confirm.setHeaderText(null);
+            confirm.setContentText("Permainan masih berlangsung. Kembali ke menu utama "
+                    + "akan dihitung sebagai resign (kalah). Lanjutkan?");
+            Optional<ButtonType> result = confirm.showAndWait();
+            if (result.isEmpty() || result.get() != ButtonType.OK) return;
+
+            gameOver = true;
+            try {
+                client.sendMessage(new Message(MessageType.RESIGN, null, myColor.name()));
+            } catch (Exception ignored) {
+            }
+            returnToMenu();
+            return;
+        }
+
+        if (!gameOver) {
+            Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+            confirm.setTitle("Kembali ke Menu Utama");
+            confirm.setHeaderText(null);
+            confirm.setContentText("Kembali ke menu utama? Permainan akan dihentikan.");
+            Optional<ButtonType> result = confirm.showAndWait();
+            if (result.isEmpty() || result.get() != ButtonType.OK) return;
+        }
+        returnToMenu();
+    }
+
+    /** Hentikan ticker, nonaktifkan callback disconnect, putus socket, tampilkan menu utama. */
+    private void returnToMenu() {
+        gameOver = true;
+        if (clockTicker != null) clockTicker.stop();
+        // Cegah alert "Koneksi terputus" muncul saat disconnect yang disengaja ini.
+        client.setOnDisconnected(() -> { });
+        client.disconnect();
+        new MainMenuController(stage).show();
+    }
+
+    /** True kalau permainan sedang berlangsung dan keluar = resign. */
+    private boolean isGameActive() {
+        if (gameOver || state == null) return false;
+        return state.getStatus() == GameStatus.PLAYING || state.getStatus() == GameStatus.CHECK;
     }
 }

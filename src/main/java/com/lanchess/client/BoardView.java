@@ -175,11 +175,25 @@ public class BoardView extends Canvas {
 
     private static final Color PREMOVE_HIGHLIGHT = Color.web("#4A90D9", 0.45);
 
-    /** Highlight kotak asal & tujuan premove yang sedang diantrikan. Panggil SETELAH render(). */
-    public void drawPremoveHighlight(int fromRow, int fromCol, int toRow, int toCol) {
+    /** Highlight SELURUH antrean premove + nomor urut tiap langkah. Panggil SETELAH render(). */
+    public void drawPremoveHighlights(List<PremoveQueue.Entry> entries) {
+        if (entries == null || entries.isEmpty()) return;
         GraphicsContext gc = getGraphicsContext2D();
-        fillSquare(gc, fromRow, fromCol, PREMOVE_HIGHLIGHT);
-        fillSquare(gc, toRow, toCol, PREMOVE_HIGHLIGHT);
+        int n = 1;
+        for (PremoveQueue.Entry e : entries) {
+            fillSquare(gc, e.fromRow(), e.fromCol(), PREMOVE_HIGHLIGHT);
+            fillSquare(gc, e.toRow(), e.toCol(), PREMOVE_HIGHLIGHT);
+            // Nomor urut antrean di tengah kotak tujuan
+            int dr = toDisplayRow(e.toRow());
+            int dc = toDisplayCol(e.toCol());
+            double cx = dc * squareSize + squareSize / 2.0;
+            double cy = dr * squareSize + squareSize / 2.0;
+            gc.setFill(Color.web("#1D4ED8"));
+            gc.setFont(Font.font("SansSerif", FontWeight.BOLD, squareSize * 0.30));
+            gc.setTextAlign(TextAlignment.CENTER);
+            gc.fillText(String.valueOf(n), cx, cy + squareSize * 0.11);
+            n++;
+        }
     }
 
     private void drawLegalMoveHints(GraphicsContext gc, GameState state, List<Move> legalMoves) {

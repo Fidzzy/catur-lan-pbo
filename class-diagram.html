@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LAN Chess Arena — Class Diagram</title>
+<style>
+  :root {
+    --bg: #14161f; --bg2: #1d2030; --card: #232741; --line: #3a4066;
+    --txt: #e8eaf2; --muted: #9aa0c3; --accent: #7c8cf8; --accent2: #58c98b;
+    --warn: #f2b84b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", Arial, sans-serif; background: var(--bg); color: var(--txt); }
+  header { padding: 28px 32px 16px; background: linear-gradient(135deg, #1d2030, #262b4d); border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0 0 6px; font-size: 26px; }
+  header p { margin: 4px 0; color: var(--muted); font-size: 14px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 32px; background: var(--bg2); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 10; }
+  .toolbar button, .toolbar input {
+    background: var(--card); color: var(--txt); border: 1px solid var(--line);
+    border-radius: 20px; padding: 7px 16px; font-size: 13px; cursor: pointer;
+  }
+  .toolbar button.active, .toolbar button:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .toolbar input { cursor: text; min-width: 220px; }
+  main { padding: 24px 32px 60px; max-width: 1400px; margin: 0 auto; }
+  section.pkg { background: var(--bg2); border: 1px solid var(--line); border-radius: 12px; margin: 22px 0; overflow: hidden; }
+  section.pkg > h2 { margin: 0; padding: 14px 20px; background: var(--card); font-size: 17px; border-bottom: 1px solid var(--line); }
+  section.pkg > h2 .tag { font-size: 12px; color: var(--muted); font-weight: normal; margin-left: 8px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; padding: 16px 20px 20px; }
+  .cls { background: #191c2c; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; font-size: 13px; }
+  .cls.enum { border-left: 4px solid var(--warn); }
+  .cls.abstract { border-left: 4px solid var(--accent2); }
+  .cls h3 { margin: 0; padding: 10px 14px; background: #20243a; font-size: 14px; }
+  .cls h3 .kind { font-size: 11px; color: var(--muted); font-weight: normal; margin-left: 6px; }
+  .cls .body { padding: 8px 14px 12px; }
+  .cls h4 { margin: 10px 0 4px; font-size: 12px; color: var(--accent); text-transform: uppercase; letter-spacing: .5px; }
+  .cls ul { margin: 0; padding-left: 18px; color: #cfd3ea; }
+  .cls li { margin: 2px 0; }
+  .cls code { color: #ffd98a; font-size: 12px; }
+  .rels { padding: 6px 20px 18px; font-size: 13px; color: #cfd3ea; }
+  .rels li { margin: 3px 0; }
+  #diagramWrap { background: #fff; border-radius: 12px; padding: 12px; overflow: auto; border: 1px solid var(--line); }
+  #diagramWrap svg { max-width: none; }
+  .note { color: var(--muted); font-size: 13px; }
+  footer { padding: 18px 32px 40px; color: var(--muted); font-size: 12px; }
+  @media print { .toolbar { display: none; } body { background: #fff; color: #000; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>♞ LAN Chess Arena — Class Diagram</h1>
+  <p>Java 21 + JavaFX + TCP Socket + Stockfish (UCI) &nbsp;|&nbsp; package root: <code>com.lanchess</code></p>
+  <p class="note">Diagram visual (Mermaid, butuh internet sekali untuk load CDN) + tabel detail tiap kelas (bisa dibaca offline). Klik tombol package untuk fokus.</p>
+</header>
+
+<div class="toolbar">
+  <button data-f="all" class="active">Semua</button>
+  <button data-f="diagram">Hanya Diagram</button>
+  <button data-f="model">model</button>
+  <button data-f="server">server</button>
+  <button data-f="bot">bot</button>
+  <button data-f="client">client</button>
+  <input id="q" type="text" placeholder="Cari kelas… mis. GameState">
+  <button onclick="window.print()">🖨 Cetak / PDF</button>
+</div>
+
+<main>
+  <!-- ================= DIAGRAM MERMAID ================= -->
+  <section class="pkg" data-pkg="diagram">
+    <h2>Diagram Kelas (Mermaid classDiagram) <span class="tag">scroll horizontal jika lebar</span></h2>
+    <div style="padding:16px 20px">
+      <div id="diagramWrap">
+<pre class="mermaid">
+classDiagram
+%% ---------- MODEL ----------
+namespace model {
+  class GameState {
+    -Piece[][] board
+    -PlayerColor currentTurn
+    -GameStatus status
+    -List~Move~ moveHistory
+    -TimeControl timeControl
+    -long whiteMillisRemaining
+    -long blackMillisRemaining
+    -PlayerColor loserColor
+    -DrawReason drawReason
+    +getPieceAt(row, col) Piece
+    +findKing(color) Piece
+    +addMove(move) void
+    +switchTurn() void
+    +currentPositionKey() String
+    +getRemainingMillis(color) long
+  }
+  class Move {
+    -int fromRow
+    -int fromCol
+    -int toRow
+    -int toCol
+    -PieceType pieceType
+    -PlayerColor pieceColor
+    -boolean castling
+    -boolean enPassant
+    -PieceType promotionType
+    +isPromotion() bool
+    +isCapture() bool
+  }
+  class Message {
+    -MessageType type
+    -Object payload
+    -String sender
+    +getType() MessageType
+    +getPayloadAs() T
+  }
+  class BoardFactory {
+    +createStandardBoard() Piece[][]
+  }
+  class GameStatus {
+    &lt;&lt;enumeration&gt;&gt;
+    WAITING_FOR_PLAYER
+    PLAYING
+    CHECK
+    CHECKMATE
+    STALEMATE
+    DRAW
+    TIMEOUT
+    RESIGNATION
+    DISCONNECTED
+  }
+  class MessageType {
+    &lt;&lt;enumeration&gt;&gt;
+    JOIN
+    ASSIGN_COLOR
+    STATE_UPDATE
+    MOVE
+    MOVE_REJECTED
+    CHAT
+    RESIGN
+    DRAW_OFFER
+    DRAW_ACCEPT
+    DRAW_DECLINE
+    END
+    ERROR
+    DISCONNECT
+  }
+  class PlayerColor {
+    &lt;&lt;enumeration&gt;&gt;
+    WHITE
+    BLACK
+    +opposite() PlayerColor
+  }
+  class PieceType {
+    &lt;&lt;enumeration&gt;&gt;
+    KING
+    QUEEN
+    ROOK
+    BISHOP
+    KNIGHT
+    PAWN
+  }
+  class TimeControl {
+    &lt;&lt;enumeration&gt;&gt;
+    BULLET_1
+    BLITZ_3
+    BLITZ_5
+    RAPID_10
+    RAPID_15
+    RAPID_30
+    UNLIMITED
+    +getInitialMillis() long
+    +isUnlimited() bool
+  }
+  class DrawReason {
+    &lt;&lt;enumeration&gt;&gt;
+    AGREEMENT
+    THREEFOLD_REPETITION
+    FIFTY_MOVE_RULE
+  }
+  class Piece {
+    &lt;&lt;abstract&gt;&gt;
+    #PlayerColor color
+    #int row
+    #int col
+    #boolean hasMoved
+    +getMoves(board) List~Move~
+    +getType() PieceType
+    +copy() Piece
+    +moveTo(row, col) void
+  }
+  class King
+  class Queen
+  class Rook
+  class Bishop
+  class Knight
+  class Pawn
+}
+
+%% ---------- SERVER ----------
+namespace server {
+  class GameServer {
+    -GameState gameState
+    -List~ClientHandler~ clients
+    -PlayerColor hostColor
+    -GameClock gameClock
+    -PlayerColor pendingDrawOfferFrom
+    +configure(timeControl, hostColor) void
+    +start(port) void
+    +stop() void
+    +broadcastState() void
+    +broadcastEnd() void
+    +broadcastChat() void
+    +notifyMoveMade(mover) void
+    +finalizeDrawIfPending(color) bool
+    +handleDisconnect(handler) void
+  }
+  class ClientHandler {
+    -Socket socket
+    -GameServer server
+    -PlayerColor assignedColor
+    -boolean connected
+    +run() void
+    +sendMessage(msg) void
+    +handleResign() void
+    +handleMove(msg) void
+  }
+  class MoveValidator {
+    +getLegalMoves(state, r, c) List~Move~
+    +findLegalMove(state, raw) Optional~Move~
+    +executeMove(state, move) void
+    +updateGameStatus(state) void
+  }
+  class GameClock {
+    -GameState state
+    -TimerTask pendingTask
+    -long turnStartedAtMillis
+    +startTurn() void
+    +onMoveMade(mover) void
+    +stop() void
+    +getElapsedInCurrentTurn() long
+  }
+}
+
+%% ---------- BOT ----------
+namespace bot {
+  class StockfishEngine {
+    -Process process
+    -boolean running
+    +start(path) void
+    +getBestMove(fen, ms) String
+    +evaluateCentipawns(fen, ms) int
+    +setElo(elo) void
+    +quit() void
+  }
+  class FenConverter {
+    +toFen(state) String
+    +parseUciMove(uci, state) Move
+  }
+  class BotDifficulty {
+    &lt;&lt;enumeration&gt;&gt;
+    BEGINNER_1320
+    EASY_1500
+    MEDIUM_1800
+    HARD_2200
+    EXPERT_2600
+    MAXIMUM_3190
+    +getMoveTimeMs() int
+  }
+  class StockfishLocator {
+    +autoDetect() String
+  }
+}
+
+%% ---------- CLIENT ----------
+namespace client {
+  class MainApp {
+    +start(stage) void
+  }
+  class AppLauncher {
+    +main(args) void
+  }
+  class MainMenuController {
+    -Stage stage
+    +show() void
+  }
+  class FriendModeController {
+    -NetworkClient networkClient
+    +show() void
+    +connect(host) void
+  }
+  class HostSetupController {
+    +show() void
+    +connectAsHost() void
+  }
+  class BotSetupController {
+    +show() void
+    +startBotGame() void
+  }
+  class GameController {
+    -NetworkClient client
+    -PlayerColor myColor
+    -GameState state
+    -boolean gameOver
+    +onMessageReceived(msg) void
+    +confirmAndReturnToMenu() void
+    +returnToMenu() void
+  }
+  class BotGameController {
+    -StockfishEngine engine
+    -PlayerColor myColor
+    -GameState state
+    -GameClock localClock
+    -boolean gameOver
+    +applyMove(move) void
+    +requestBotMove() void
+    +confirmAndReturnToMenu() void
+  }
+  class NetworkClient {
+    -Socket socket
+    -boolean connected
+    +connect(host, port, cb) void
+    +sendMessage(msg) void
+    +disconnect() void
+  }
+  class BoardView {
+    -boolean flipped
+    +render(state, sel...) void
+    +pixelToRow(y) int
+    +pixelToCol(x) int
+  }
+  class ClockPanel {
+    +update(w, b, turn, unl) void
+  }
+  class MoveHistoryPanel {
+    +refresh(history) void
+  }
+  class PlayerColorChoice {
+    +getValue() PlayerColor
+  }
+  class MoveNotationFormatter {
+    +format(move) String
+  }
+  class Theme {
+    +apply(scene) void
+  }
+  class DebugLog {
+    +log(tag, msg) void
+  }
+}
+
+%% ---------- RELASI ----------
+Piece &lt;|-- King
+Piece &lt;|-- Queen
+Piece &lt;|-- Rook
+Piece &lt;|-- Bishop
+Piece &lt;|-- Knight
+Piece &lt;|-- Pawn
+GameState *-- Piece : board 8x8
+GameState o-- Move : moveHistory
+GameState --&gt; PlayerColor
+GameState --&gt; GameStatus
+GameState --&gt; TimeControl
+GameState --&gt; DrawReason
+Move --&gt; PieceType
+Move --&gt; PlayerColor
+Message --&gt; MessageType
+BoardFactory ..&gt; GameState : create
+BoardFactory ..&gt; Piece : create
+GameServer *-- GameState : owns
+GameServer o-- ClientHandler : 2 clients
+GameServer --&gt; GameClock
+ClientHandler --&gt; GameServer
+ClientHandler ..&gt; MoveValidator : validate
+MoveValidator ..&gt; GameState
+MoveValidator ..&gt; Move
+GameClock --&gt; GameState
+GameController --&gt; NetworkClient
+GameController --&gt; GameState
+GameController --&gt; BoardView
+GameController --&gt; ClockPanel
+GameController --&gt; MoveHistoryPanel
+BotGameController --&gt; StockfishEngine
+BotGameController --&gt; GameClock : localClock
+BotGameController --&gt; GameState
+BotGameController --&gt; BoardView
+BotGameController ..&gt; MoveValidator
+BotGameController ..&gt; FenConverter
+NetworkClient ..&gt; Message : transport
+FenConverter ..&gt; GameState
+FenConverter ..&gt; Move
+StockfishLocator ..&gt; StockfishEngine : path
+FriendModeController --&gt; NetworkClient
+HostSetupController ..&gt; GameServer : start
+MainMenuController ..&gt; FriendModeController
+MainMenuController ..&gt; BotSetupController
+MainApp ..&gt; MainMenuController
+AppLauncher ..&gt; MainApp : launch
+</pre>
+      </div>
+      <p class="note">Tips: gunakan <b>Cetak / PDF</b> untuk menyimpan diagram sebagai dokumen. Tabel di bawah selalu tersedia meski offline.</p>
+    </div>
+  </section>
+
+  <!-- ================= MODEL ================= -->
+  <section class="pkg" data-pkg="model">
+    <h2>📦 com.lanchess.model <span class="tag">Serializable — dikirim via ObjectStream</span></h2>
+    <div class="grid">
+      <div class="cls"><h3>GameState <span class="kind">class</span></h3><div class="body">
+        <h4>Atribut</h4><ul><li><code>board: Piece[8][8]</code></li><li><code>currentTurn: PlayerColor</code></li><li><code>status: GameStatus</code></li><li><code>moveHistory: List&lt;Move&gt;</code></li><li><code>timeControl: TimeControl</code></li><li><code>whiteMillisRemaining, blackMillisRemaining: long</code></li><li><code>loserColor: PlayerColor</code>, <code>drawReason: DrawReason</code></li><li><code>positionCounts: Map&lt;String,Integer&gt;</code> (threefold)</li></ul>
+        <h4>Method kunci</h4><ul><li><code>getPieceAt / findKing / addMove / switchTurn</code></li><li><code>currentPositionKey()</code>, <code>deductElapsed()</code></li></ul>
+      </div></div>
+      <div class="cls"><h3>Move <span class="kind">class</span></h3><div class="body">
+        <h4>Atribut</h4><ul><li><code>fromRow/Col, toRow/Col: int</code></li><li><code>pieceType: PieceType</code>, <code>pieceColor: PlayerColor</code></li><li><code>castling, enPassant: boolean</code></li><li><code>promotionType, capturedType: PieceType</code></li></ul>
+        <h4>Method</h4><ul><li><code>isPromotion() / isCapture() / isKingsideCastling()</code></li></ul>
+      </div></div>
+      <div class="cls"><h3>Message <span class="kind">class (Command)</span></h3><div class="body">
+        <h4>Atribut</h4><ul><li><code>type: MessageType</code></li><li><code>payload: Object</code>, <code>sender: String</code></li></ul>
+        <h4>Method</h4><ul><li><code>getType() / getPayloadAs&lt;T&gt;() / getSender()</code></li></ul>
+      </div></div>
+      <div class="cls"><h3>BoardFactory <span class="kind">Factory</span></h3><div class="body">
+        <h4>Method</h4><ul><li><code>createStandardBoard(): Piece[][]</code></li><li><code>placeBackRank(...)</code></li></ul>
+      </div></div>
+      <div class="cls enum"><h3>GameStatus <span class="kind">enum</span></h3><div class="body"><ul><li><code>WAITING_FOR_PLAYER, PLAYING, CHECK, CHECKMATE, STALEMATE, DRAW, TIMEOUT, RESIGNATION, DISCONNECTED</code></li></ul></div></div>
+      <div class="cls enum"><h3>MessageType <span class="kind">enum</span></h3><div class="body"><ul><li><code>JOIN, ASSIGN_COLOR, STATE_UPDATE, MOVE, MOVE_REJECTED, CHAT, RESIGN, DRAW_OFFER, DRAW_ACCEPT, DRAW_DECLINE, END, ERROR, DISCONNECT</code></li></ul></div></div>
+      <div class="cls enum"><h3>PlayerColor <span class="kind">enum</span></h3><div class="body"><ul><li><code>WHITE, BLACK</code> + <code>opposite()</code></li></ul></div></div>
+      <div class="cls enum"><h3>PieceType <span class="kind">enum</span></h3><div class="body"><ul><li><code>KING, QUEEN, ROOK, BISHOP, KNIGHT, PAWN</code> + <code>getNotation()</code></li></ul></div></div>
+      <div class="cls enum"><h3>TimeControl <span class="kind">enum</span></h3><div class="body"><ul><li><code>BULLET_1 … RAPID_30, UNLIMITED</code></li><li><code>getInitialMillis() / isUnlimited()</code></li></ul></div></div>
+      <div class="cls enum"><h3>DrawReason <span class="kind">enum</span></h3><div class="body"><ul><li><code>AGREEMENT, THREEFOLD_REPETITION, FIFTY_MOVE_RULE</code></li></ul></div></div>
+      <div class="cls abstract"><h3>Piece <span class="kind">abstract</span></h3><div class="body">
+        <h4>Atribut</h4><ul><li><code>color, row, col, hasMoved</code></li></ul>
+        <h4>Method</h4><ul><li><code>getMoves(board) / getType() / copy() / moveTo()</code></li><li><code>inBounds() / slide()</code> (helper)</li></ul>
+        <h4>Subclass</h4><ul><li><code>King, Queen, Rook, Bishop, Knight, Pawn</code> — masing-masing override <code>getMoves/getType/copy</code></li></ul>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- ================= SERVER ================= -->
+  <section class="pkg" data-pkg="server">
+    <h2>🖥 com.lanchess.server <span class="tag">otoritatif: rules + clock + relay</span></h2>
+    <div class="grid">
+      <div class="cls"><h3>GameServer <span class="kind">Subject (Observer)</span></h3><div class="body">
+        <h4>Atribut</h4><ul><li><code>gameState: GameState</code>, <code>clients: CopyOnWriteArrayList&lt;ClientHandler&gt;</code></li><li><code>hostColor, pendingDrawOfferFrom: PlayerColor</code>, <code>gameClock: GameClock</code></li></ul>
+        <h4>Method</h4><ul><li><code>configure() / start(port) / stop()</code></li><li><code>broadcastState() / broadcastEnd() / broadcastChat()</code></li><li><code>notifyMoveMade() / stopClock() / relayDrawOffer() / relayDrawDecline() / finalizeDrawIfPending() / handleDisconnect() / handleTimeout()</code></li></ul>
+      </div></div>
+      <div class="cls"><h3>ClientHandler <span class="kind">Runnable, 1 thread/client</span></h3><div class="body">
+        <h4>Atribut</h4><ul><li><code>socket, server: GameServer, assignedColor, connected</code>, <code>readyLatch</code></li></ul>
+        <h4>Method</h4><ul><li><code>run() / awaitReady() / handleMessage()</code></li><li><code>handleMove() / handleResign() / handleDrawOffer-Accept-Decline()</code></li><li><code>sendMessage()</code> (+ <code>out.reset()</code>)</li></ul>
+      </div></div>
+      <div class="cls"><h3>MoveValidator <span class="kind">single source of truth</span></h3><div class="body">
+        <h4>Method (static)</h4><ul><li><code>getLegalMoves / getAllLegalMoves / findLegalMove / executeMove / updateGameStatus</code></li><li><code>isInCheck / isSquareAttacked / castling / en passant</code></li></ul>
+      </div></div>
+      <div class="cls"><h3>GameClock <span class="kind">synchronized</span></h3><div class="body">
+        <h4>Atribut</h4><ul><li><code>state, onTimeout, timer, pendingTask, turnStartedAtMillis</code></li></ul>
+        <h4>Method</h4><ul><li><code>startTurn() / onMoveMade() / stop() / getElapsedInCurrentTurn()</code></li></ul>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- ================= BOT ================= -->
+  <section class="pkg" data-pkg="bot">
+    <h2>🤖 com.lanchess.bot <span class="tag">Stockfish via UCI</span></h2>
+    <div class="grid">
+      <div class="cls"><h3>StockfishEngine <span class="kind">class</span></h3><div class="body">
+        <h4>Atribut</h4><ul><li><code>process: Process, writer, reader, running</code></li></ul>
+        <h4>Method</h4><ul><li><code>start(path) / getBestMove(fen, ms) / evaluateCentipawns(fen, ms) / setElo() / setSkillLevel() / newGame() / quit()</code></li></ul>
+      </div></div>
+      <div class="cls"><h3>FenConverter <span class="kind">utility</span></h3><div class="body">
+        <h4>Method (static)</h4><ul><li><code>toFen(state): String</code></li><li><code>parseUciMove("e2e4", state): Move</code></li></ul>
+      </div></div>
+      <div class="cls enum"><h3>BotDifficulty <span class="kind">enum</span></h3><div class="body"><ul><li><code>BEGINNER(1320) … MAXIMUM(3190)</code> + <code>movetime 300–2500 ms</code></li></ul></div></div>
+      <div class="cls"><h3>StockfishLocator <span class="kind">utility</span></h3><div class="body"><ul><li><code>autoDetect(): String</code> (PATH + lokasi umum)</li></ul></div></div>
+    </div>
+  </section>
+
+  <!-- ================= CLIENT ================= -->
+  <section class="pkg" data-pkg="client">
+    <h2>🎨 com.lanchess.client <span class="kind tag">JavaFX GUI</span></h2>
+    <div class="grid">
+      <div class="cls"><h3>MainApp / AppLauncher <span class="kind">entry point</span></h3><div class="body"><ul><li><code>MainApp extends Application → MainMenuController</code></li><li><code>AppLauncher.main()</code> (fat JAR, tidak extends Application)</li></ul></div></div>
+      <div class="cls"><h3>MainMenuController</h3><div class="body"><ul><li><code>show()</code> → FriendMode / BotSetup</li></ul></div></div>
+      <div class="cls"><h3>FriendModeController</h3><div class="body"><ul><li><code>networkClient, assignedColor</code></li><li><code>show() / onJoinClicked() / connect() / onMessageReceived()</code> → GameController</li></ul></div></div>
+      <div class="cls"><h3>HostSetupController</h3><div class="body"><ul><li><code>timerChoice, colorChoice</code></li><li><code>onStartClicked()</code> → start GameServer + self-connect → GameController</li></ul></div></div>
+      <div class="cls"><h3>BotSetupController</h3><div class="body"><ul><li><code>eloChoice, timerChoice, colorChoice, enginePathField</code></li><li><code>onStartClicked() / startBotGame()</code> → BotGameController</li></ul></div></div>
+      <div class="cls"><h3>GameController <span class="kind">mode LAN</span></h3><div class="body">
+        <h4>Atribut</h4><ul><li><code>client: NetworkClient, myColor, state: GameState</code></li><li><code>selectedRow/Col, currentLegalMoves, gameOver</code></li><li><code>premove*</code> (UX client-side)</li><li><code>boardView, clockPanel, historyPanel, chatArea</code></li></ul>
+        <h4>Method</h4><ul><li><code>onMessageReceived() / handleSquareClick() / trySubmitPremove()</code></li><li><code>onResignClicked() / onOfferDrawClicked()</code></li><li><code>confirmAndReturnToMenu() / returnToMenu()</code> ⭐ (resign otomatis)</li></ul>
+      </div></div>
+      <div class="cls"><h3>BotGameController <span class="kind">mode vs Bot</span></h3><div class="body">
+        <h4>Atribut</h4><ul><li><code>engine: StockfishEngine, difficulty, myColor/botColor</code></li><li><code>state, localClock: GameClock, botThinking, gameOver</code></li></ul>
+        <h4>Method</h4><ul><li><code>applyMove() / requestBotMove() / trySubmitPremove()</code></li><li><code>onResignClicked() / onOfferDrawClicked()</code> (evaluasi Stockfish)</li><li><code>confirmAndReturnToMenu()</code> ⭐ (resign otomatis)</li></ul>
+      </div></div>
+      <div class="cls"><h3>NetworkClient</h3><div class="body"><ul><li><code>socket, in/out, listenerThread, connected</code></li><li><code>connect() / sendMessage() (+reset) / disconnect()</code></li></ul></div></div>
+      <div class="cls"><h3>BoardView <span class="kind">extends Canvas</span></h3><div class="body"><ul><li><code>render() / drawPremoveHighlight() / pixelToRow-Col()</code></li></ul></div></div>
+      <div class="cls"><h3>ClockPanel / MoveHistoryPanel / PlayerColorChoice / MoveNotationFormatter / Theme / DebugLog</h3><div class="body"><ul><li><code>ClockPanel.update()</code> — interpolasi visual jam</li><li><code>MoveHistoryPanel.refresh()</code></li><li><code>MoveNotationFormatter.format()</code></li><li><code>Theme.apply()</code> — theme.css</li></ul></div></div>
+    </div>
+    <div class="rels"><b>Alur layar:</b> MainMenu → FriendMode → HostSetup → (GameServer) → GameController &nbsp;|&nbsp; MainMenu → BotSetup → (StockfishEngine) → BotGameController</div>
+  </section>
+
+  <!-- ================= RELASI ================= -->
+  <section class="pkg" data-pkg="all">
+    <h2>🔗 Daftar Relasi Utama</h2>
+    <ul class="rels">
+      <li><b>Inheritance:</b> Piece ◁ King, Queen, Rook, Bishop, Knight, Pawn</li>
+      <li><b>Composition:</b> GameState ◆ board Piece[8][8] &nbsp;|&nbsp; GameServer ◆ GameState &nbsp;|&nbsp; GameServer ◇ ClientHandler (2)</li>
+      <li><b>Association:</b> GameState → PlayerColor/GameStatus/TimeControl/DrawReason; Move → PieceType/PlayerColor; Message → MessageType; GameServer → GameClock; ClientHandler → GameServer; GameController → NetworkClient/BoardView/ClockPanel/MoveHistoryPanel; BotGameController → StockfishEngine/GameClock/BoardView</li>
+      <li><b>Dependency:</b> BoardFactory ⇢ GameState/Piece; MoveValidator ⇢ GameState/Move; FenConverter ⇢ GameState/Move; NetworkClient ⇢ Message; HostSetup ⇢ GameServer; StockfishLocator ⇢ StockfishEngine</li>
+      <li><b>Patterns:</b> Observer (GameServer→ClientHandler), State Machine (GameStatus), Command (Message), Factory (BoardFactory)</li>
+    </ul>
+  </section>
+</main>
+
+<footer>Dibuat otomatis dari source <code>src/main/java</code> — LAN Chess Arena, 2026.</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: "neutral", class: { useMaxWidth: false } });
+  const btns = document.querySelectorAll(".toolbar button[data-f]");
+  btns.forEach(b => b.addEventListener("click", () => {
+    btns.forEach(x => x.classList.remove("active")); b.classList.add("active");
+    const f = b.dataset.f;
+    document.querySelectorAll("section.pkg").forEach(s => {
+      const p = s.dataset.pkg;
+      s.style.display = (f === "all") ? "" : ((f === "diagram") ? (p === "diagram" ? "" : "none") : ((p === f || p === "diagram" || p === "all") ? "" : "none"));
+    });
+  }));
+  document.getElementById("q").addEventListener("input", e => {
+    const q = e.target.value.toLowerCase();
+    document.querySelectorAll(".cls").forEach(c => {
+      c.style.display = (!q || c.textContent.toLowerCase().includes(q)) ? "" : "none";
+    });
+  });
+</script>
+</body>
+</html>

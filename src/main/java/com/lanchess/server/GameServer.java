@@ -242,9 +242,21 @@ public class GameServer {
         }
     }
 
-    /** Dipanggil ClientHandler saat koneksi client putus (error/DISCONNECT). */
+    /** Dipanggil ClientHandler saat koneksi client putus (error/DISCONNECT).
+     *  Kalau game sudah berakhir (RESIGNATION/TIMEOUT/DRAW/dsb. - mis. pemain
+     *  menekan "Kembali ke Menu Utama" yang mengirim RESIGN lalu disconnect),
+     *  status akhir JANGAN ditimpa jadi DISCONNECTED dan lawan tidak perlu
+     *  dikirimi ERROR lagi - cukup hapus client yang putus secara diam-diam. */
     public synchronized void handleDisconnect(ClientHandler handler) {
         clients.remove(handler);
+        GameStatus status = gameState.getStatus();
+        boolean gameStillActive = status == GameStatus.PLAYING
+                || status == GameStatus.CHECK
+                || status == GameStatus.WAITING_FOR_PLAYER;
+        if (!gameStillActive) {
+            log(handler.getAssignedColor() + " terputus setelah game berakhir (" + status + "), status akhir dipertahankan.");
+            return;
+        }
         if (gameClock != null) gameClock.stop();
         gameState.setStatus(GameStatus.DISCONNECTED);
         log(handler.getAssignedColor() + " terputus dari server.");

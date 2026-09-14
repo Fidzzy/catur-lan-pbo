@@ -130,9 +130,9 @@ src/main/resources/com/lanchess/client/theme.css  -> design system: gradient bg,
 - **50-Move Rule** — `GameState.computeHalfmoveClock()` menghitung half-move sejak capture/pawn-move terakhir; begitu mencapai 100 (50 langkah penuh), otomatis `DRAW` + `DrawReason.FIFTY_MOVE_RULE`.
 - **Bot mode menerima/menolak draw offer berdasarkan evaluasi Stockfish SUNGGUHAN** (bukan random): `StockfishEngine.evaluateCentipawns()` parsing baris `info ... score cp/mate ...` dari output UCI. Bot menolak kalau yakin unggul >150 centipawn dari sudut pandangnya sendiri, menerima kalau posisi seimbang atau bot tertinggal.
 
-## Premove (Client-Side)
+## Premove Tak Terbatas (Client-Side)
 
-Klik papan **saat bukan giliran sendiri** (mode LAN: menunggu lawan; mode Bot: Stockfish sedang berpikir) mengantrikan langkah, bukan mengabaikannya. Begitu giliran benar-benar tiba, premove otomatis dicoba dikirim — kalau posisi sudah berubah gara-gara langkah lawan sehingga premove tidak legal lagi, dibuang diam-diam tanpa error. Klik-kanan membatalkan premove yang sedang diantrikan. Ini murni fitur UX client-side (`GameController`/`BotGameController`) — server tetap memvalidasi setiap langkah yang benar-benar terkirim persis seperti langkah biasa, premove tidak diberi keistimewaan apapun di sisi validasi.
+Klik papan **saat bukan giliran sendiri** (mode LAN: menunggu lawan; mode Bot: Stockfish sedang berpikir) mengantrikan langkah ke `PremoveQueue` — boleh BANYAK langkah berurutan, dipilih di atas posisi proyeksi (papan nyata + antrean diterapkan, highlight biru + nomor urut). Setiap kali giliran tiba, entri terdepan divalidasi ulang ke posisi nyata — kalau kotak asal sudah tak berisi bidak sendiri / tujuan terhalang bidak sendiri / langkah membuat raja sendiri skak, SELURUH sisa antrean berhenti (dibuang) diam-diam tanpa error. Klik kotak asal premove terakhir = undo premove itu (LIFO, sebelum lawan bergerak); klik-kanan membuang semua; langkah manual membatalkan antrean. Ini murni fitur UX client-side — server tetap memvalidasi setiap langkah yang benar-benar terkirim persis seperti langkah biasa, premove tidak diberi keistimewaan apapun di sisi validasi.
 
 ## Jam Catur (Timer) — Server-Authoritative
 
@@ -218,7 +218,7 @@ Semua di `MoveValidator` (server-side, single source of truth):
 - [x] **Draw Offer/Accept/Decline** — server hanya relay, tidak ubah state sampai lawan accept; bot mode menerima/menolak berdasarkan evaluasi Stockfish sungguhan
 - [x] **Threefold repetition** — otomatis terdeteksi, termasuk posisi awal permainan ikut dihitung
 - [x] **50-move rule** — otomatis terdeteksi di half-move ke-100 sejak capture/pawn-move terakhir
-- [x] **Premove** — client-side, mode LAN & Bot, auto-submit begitu giliran tiba, dibuang diam-diam kalau sudah tidak legal
+- [x] **Premove tak terbatas** — client-side, mode LAN & Bot (`PremoveQueue`): antrean banyak langkah + nomor urut, berhenti & buang semua kalau entri tak legal (kotak terisi/skak), undo LIFO, klik-kanan buang semua
 - [x] Unit test JUnit 5: `MoveValidatorTest` (22 kasus) + `FenConverterTest` (10 kasus) = 32 test
 - [ ] Increment/delay pada jam catur (saat ini sudden-death murni)
 - [ ] Insufficient material draw (mis. King vs King) — belum ada, opsional
