@@ -26,7 +26,6 @@ import javafx.scene.input.MouseButton;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
-import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 
@@ -127,7 +126,14 @@ public class GameController {
         backButton.getStyleClass().add("pill-button-secondary");
         backButton.setOnAction(e -> confirmAndReturnToMenu());
 
-        HBox actionRow = new HBox(8, resignButton, offerDrawButton, backButton);
+        Button muteButton = new Button(SoundManager.isMuted() ? "🔇" : "🔊");
+        muteButton.getStyleClass().add("pill-button-secondary");
+        muteButton.setOnAction(e -> {
+            SoundManager.setMuted(!SoundManager.isMuted());
+            muteButton.setText(SoundManager.isMuted() ? "🔇" : "🔊");
+        });
+
+        HBox actionRow = new HBox(8, resignButton, offerDrawButton, muteButton, backButton);
         actionRow.setAlignment(Pos.CENTER);
 
         VBox topBox = new VBox(6, colorLabel, clockPanel, statusLabel, actionRow);
@@ -149,21 +155,10 @@ public class GameController {
 
         historyPanel.refresh(state.getMoveHistory());
 
-        // --- Layout responsif: papan mengisi ruang sisa (square, terpusat), panel kanan lebar fix fleksibel ---
-        StackPane boardHolder = new StackPane(boardView);
-        boardHolder.setAlignment(Pos.CENTER);
-        boardHolder.setMinSize(BoardView.MIN_BOARD_SIZE, BoardView.MIN_BOARD_SIZE);
-        boardHolder.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
+        // --- Layout responsif: BoardHolder memaksa papan selalu persegi & muat
+        // (aman saat maximize/fullscreen), panel kanan lebar fleksibel ---
+        BoardHolder boardHolder = new BoardHolder(boardView);
         HBox.setHgrow(boardHolder, Priority.ALWAYS);
-        StackPane.setAlignment(boardView, Pos.CENTER);
-        Runnable fitBoard = () -> {
-            double s = Math.min(boardHolder.getWidth(), boardHolder.getHeight());
-            if (s >= BoardView.MIN_BOARD_SIZE) {
-                boardView.resize(s, s);
-            }
-        };
-        boardHolder.widthProperty().addListener((o, a, b) -> fitBoard.run());
-        boardHolder.heightProperty().addListener((o, a, b) -> fitBoard.run());
 
         VBox chatPanel = buildChatPanel();
         VBox sidePanel = new VBox(16, historyPanel, chatPanel);
@@ -186,8 +181,7 @@ public class GameController {
         redrawBoard();
 
         UiNav.show(stage, root, "LAN Chess Arena - " + myColor, 800, 600, 1080, 720);
-        // UiNav mempertahankan ukuran window; papan menyesuaikan ruang yang ada.
-        fitBoard.run();
+        // UiNav mempertahankan ukuran window; BoardHolder mengatur ukuran papan saat layout.
 
         stage.setOnCloseRequest(e -> {
             if (clockTicker != null) clockTicker.stop();
@@ -454,6 +448,8 @@ public class GameController {
                 DebugLog.log("LAN-NET", "STATE_UPDATE diterima: giliran=%s status=%s".formatted(
                         newState.getCurrentTurn(), newState.getStatus()));
                 Platform.runLater(() -> {
+                    boolean moveMade = newState.getMoveHistory().size() > state.getMoveHistory().size();
+                    boolean captured = moveMade && countPieces(newState) < countPieces(state);
                     this.state = newState;
                     this.lastStateReceivedAtMillis = System.currentTimeMillis();
                     clearSelection();
@@ -461,6 +457,16 @@ public class GameController {
                     refreshUiState();
                     redrawBoard();
                     historyPanel.refresh(state.getMoveHistory());
+
+                    if (moveMade) {
+                        if (state.getStatus() == GameStatus.CHECK || state.getStatus() == GameStatus.CHECKMATE) {
+                            SoundManager.playCheck();
+                        } else if (captured) {
+                            SoundManager.playCapture();
+                        } else {
+                            SoundManager.playMove();
+                        }
+                    }
 
                     if (state.getCurrentTurn() == myColor
                             && (state.getStatus() == GameStatus.PLAYING || state.getStatus() == GameStatus.CHECK)) {
@@ -480,7 +486,10 @@ public class GameController {
             case CHAT -> {
                 String text = message.getPayloadAs(String.class);
                 String from = message.getSender();
-                Platform.runLater(() -> chatArea.appendText(from + ": " + text + "\n"));
+                Platform.runLater(() -> {
+                    chatArea.appendText(from + ": " + text + "\n");
+                    if (!myColor.name().equals(from)) SoundManager.playNotify();
+                });
             }
             case DRAW_OFFER -> Platform.runLater(this::handleIncomingDrawOffer);
             case DRAW_DECLINE -> Platform.runLater(() ->
@@ -502,6 +511,7 @@ public class GameController {
                     premoveQueue.clear();
                     refreshUiState();
                     redrawBoard();
+                    playEndingSound();
                     showGameOverDialog(finalStatus);
                 });
             }
@@ -513,6 +523,28 @@ public class GameController {
                 });
             }
             default -> { /* JOIN/ASSIGN_COLOR/DISCONNECT tidak relevan lagi di fase gameplay */ }
+        }
+    }
+
+    /** Hitung jumlah bidak di papan (untuk deteksi capture antar STATE_UPDATE). */
+    private static int countPieces(GameState s) {
+        int n = 0;
+        for (int r = 0; r < 8; r++) {
+            for (int c = 0; c < 8; c++) {
+                if (s.getPieceAt(r, c) != null) n++;
+            }
+        }
+        return n;
+    }
+
+    /** Bunyi akhir game: menang/kalah dari sudut pandang pemain, seri = notifikasi netral. */
+    private void playEndingSound() {
+        if (state.getLoserColor() == null) {
+            SoundManager.playNotify();
+        } else if (state.getLoserColor() == myColor) {
+            SoundManager.playLose();
+        } else {
+            SoundManager.playWin();
         }
     }
 

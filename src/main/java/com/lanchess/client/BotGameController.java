@@ -30,7 +30,6 @@ import javafx.scene.input.MouseButton;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
-import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 
@@ -180,10 +179,17 @@ public class BotGameController {
         undoButton.getStyleClass().add("pill-button-secondary");
         undoButton.setOnAction(e -> onUndoClicked());
 
+        Button muteButton = new Button(SoundManager.isMuted() ? "🔇" : "🔊");
+        muteButton.getStyleClass().add("pill-button-secondary");
+        muteButton.setOnAction(e -> {
+            SoundManager.setMuted(!SoundManager.isMuted());
+            muteButton.setText(SoundManager.isMuted() ? "🔇" : "🔊");
+        });
+
         HBox statusRow = new HBox(8, statusLabel, thinkingIndicator);
         statusRow.setAlignment(Pos.CENTER);
 
-        HBox actionRow = new HBox(8, resignButton, offerDrawButton, hintButton, undoButton, backButton);
+        HBox actionRow = new HBox(8, resignButton, offerDrawButton, hintButton, undoButton, muteButton, backButton);
         actionRow.setAlignment(Pos.CENTER);
 
         VBox topBox = new VBox(6, infoLabel, clockPanel, statusRow, actionRow);
@@ -207,22 +213,11 @@ public class BotGameController {
 
         historyPanel.refresh(state.getMoveHistory());
 
-        // --- Layout responsif: papan mengisi ruang sisa (square, terpusat), eval & histori menempel ---
-        StackPane boardHolder = new StackPane(boardView);
-        boardHolder.setAlignment(Pos.CENTER);
-        boardHolder.setMinSize(BoardView.MIN_BOARD_SIZE, BoardView.MIN_BOARD_SIZE);
-        boardHolder.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
+        // --- Layout responsif: BoardHolder memaksa papan selalu persegi & muat
+        // (aman saat maximize/fullscreen); eval bar mengikuti tinggi papan ---
+        BoardHolder boardHolder = new BoardHolder(boardView);
         HBox.setHgrow(boardHolder, Priority.ALWAYS);
-        StackPane.setAlignment(boardView, Pos.CENTER);
-        Runnable fitBoard = () -> {
-            double s = Math.min(boardHolder.getWidth(), boardHolder.getHeight());
-            if (s >= BoardView.MIN_BOARD_SIZE) {
-                boardView.resize(s, s);
-                evalBar.setBarHeight(s);
-            }
-        };
-        boardHolder.widthProperty().addListener((o, a, b) -> fitBoard.run());
-        boardHolder.heightProperty().addListener((o, a, b) -> fitBoard.run());
+        boardView.heightProperty().addListener((o, a, b) -> evalBar.setBarHeight(b.doubleValue()));
 
         historyPanel.setPrefWidth(240);
         historyPanel.setMinWidth(190);
@@ -244,8 +239,8 @@ public class BotGameController {
         requestEvalUpdate();
 
         UiNav.show(stage, root, "LAN Chess Arena - vs Stockfish", 800, 600, 1080, 720);
-        // UiNav mempertahankan ukuran window; papan + eval bar menyesuaikan ruang yang ada.
-        fitBoard.run();
+        // UiNav mempertahankan ukuran window; BoardHolder mengatur ukuran papan saat layout.
+        evalBar.setBarHeight(boardView.getHeight());
 
         stage.setOnCloseRequest(e -> {
             dispose();
@@ -439,6 +434,9 @@ public class BotGameController {
         while (undoStack.size() > MAX_UNDO_SNAPSHOTS) {
             undoStack.removeFirst();
         }
+        // Deteksi capture SEBELUM dieksekusi (kotak tujuan terisi / en passant).
+        boolean captured = state.getPieceAt(validatedMove.getToRow(), validatedMove.getToCol()) != null
+                || validatedMove.isEnPassant();
         PlayerColor mover = state.getCurrentTurn();
         MoveValidator.executeMove(state, validatedMove);
         if (localClock != null) {
@@ -448,6 +446,24 @@ public class BotGameController {
         if (status == GameStatus.CHECKMATE || status == GameStatus.STALEMATE || status == GameStatus.DRAW) {
             gameOver = true;
             if (localClock != null) localClock.stop();
+            playEndingSound();
+        } else if (status == GameStatus.CHECK) {
+            SoundManager.playCheck();
+        } else if (captured) {
+            SoundManager.playCapture();
+        } else {
+            SoundManager.playMove();
+        }
+    }
+
+    /** Bunyi akhir game: menang/kalah dari sudut pandang pemain, seri = notifikasi netral. */
+    private void playEndingSound() {
+        if (state.getLoserColor() == null) {
+            SoundManager.playNotify();
+        } else if (state.getLoserColor() == myColor) {
+            SoundManager.playLose();
+        } else {
+            SoundManager.playWin();
         }
     }
 
@@ -463,6 +479,7 @@ public class BotGameController {
             redrawBoard();
             refreshStatus();
             updateActionButtons();
+            playEndingSound();
             showGameOverDialog();
         });
     }
@@ -642,6 +659,7 @@ public class BotGameController {
         redrawBoard();
         refreshStatus();
         updateActionButtons();
+        playEndingSound();
         showGameOverDialog();
     }
 
@@ -687,6 +705,7 @@ public class BotGameController {
                     redrawBoard();
                     refreshStatus();
                     updateActionButtons();
+                    playEndingSound();
                     showGameOverDialog();
                 } else {
                     refreshStatus();

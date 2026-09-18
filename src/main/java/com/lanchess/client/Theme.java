@@ -1,11 +1,7 @@
 package com.lanchess.client;
 
 import com.lanchess.model.GameState;
-import javafx.geometry.Pos;
 import javafx.scene.Scene;
-import javafx.scene.layout.HBox;
-import javafx.scene.layout.Priority;
-import javafx.scene.layout.StackPane;
 
 import java.util.List;
 
@@ -38,25 +34,10 @@ public final class Theme {
     /**
      * Preview papan yang RESPONSIF untuk layar setup (Friend/Host/Bot):
      * papan mengisi ruang sisa dan ikut membesar/mengecil mengikuti window
-     * (square-fit, terpusat). Pakai ini sebagai child HBox root, bukan
-     * {@link #smallBoardPreview()} yang ukurannya fix.
+     * (square-fit, terpusat, tidak mungkin terpotong). Pakai ini sebagai
+     * child HBox root, bukan {@link #smallBoardPreview()} yang ukurannya fix.
      */
-    public static StackPane responsivePreview() {
-        BoardView preview = smallBoardPreview();
-        StackPane holder = new StackPane(preview);
-        holder.setAlignment(Pos.CENTER);
-        holder.setMinSize(180, 180);
-        holder.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
-        HBox.setHgrow(holder, Priority.ALWAYS);
-        StackPane.setAlignment(preview, Pos.CENTER);
-        Runnable fit = () -> {
-            double s = Math.min(holder.getWidth(), holder.getHeight());
-            if (s >= 120) {
-                preview.resize(s, s);
-            }
-        };
-        holder.widthProperty().addListener((o, a, b) -> fit.run());
-        holder.heightProperty().addListener((o, a, b) -> fit.run());
-        return holder;
+    public static BoardHolder responsivePreview() {
+        return new BoardHolder(smallBoardPreview());
     }
 }

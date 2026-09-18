@@ -32,8 +32,15 @@ public class EvalBar extends VBox {
     private double lastProb = 0.5;
     private String lastScoreText = "0.0";
 
+    /**
+     * Tinggi bar yang DIMINTA (mengikuti tinggi papan). Tinggi canvas aktual
+     * bisa lebih kecil kalau ruang window tidak cukup - lihat layoutChildren().
+     */
+    private double targetHeight;
+
     public EvalBar(double height) {
-        this.canvas = new Canvas(BAR_WIDTH, Math.max(height, MIN_BAR_HEIGHT));
+        this.targetHeight = Math.max(height, MIN_BAR_HEIGHT);
+        this.canvas = new Canvas(BAR_WIDTH, this.targetHeight);
         this.scoreLabel = new Label("0.0");
         scoreLabel.getStyleClass().add("section-label");
         scoreLabel.setFont(Font.font("SansSerif", FontWeight.BOLD, 11));
@@ -44,7 +51,13 @@ public class EvalBar extends VBox {
 
         setSpacing(6);
         setFillWidth(true);
-        setMinWidth(BAR_WIDTH + 10);
+        // PENTING: minimum vertikal NOL. Canvas bukan Region sehingga JavaFX
+        // menghitung minimum VBox ini dari ukuran canvas SAAT ITU - kalau min
+        // dibiarkan computed, canvas yang membesar (mengikuti papan) ikut
+        // mendongkrak minimum seluruh window (feedback loop): root minimum
+        // melebihi tinggi scene, BorderPane meluap ke bawah, dan baris papan
+        // terbawah terpotong. Dengan min 0, bar mengecil anggun saat sempit.
+        setMinSize(BAR_WIDTH + 10, 0);
         setMaxWidth(100);
         // Canvas jangan ikut stretch horizontal oleh VBox, tapi boleh grow vertikal via setBarHeight.
         VBox.setVgrow(canvas, Priority.ALWAYS);
@@ -55,10 +68,27 @@ public class EvalBar extends VBox {
     /** Ikuti tinggi papan supaya bar selalu sejajar papan saat window di-resize. */
     public void setBarHeight(double height) {
         double h = Math.max(height, MIN_BAR_HEIGHT);
-        if (Math.abs(canvas.getHeight() - h) < 0.5) return;
-        canvas.setHeight(h);
-        canvas.setWidth(BAR_WIDTH);
-        repaint();
+        if (Math.abs(targetHeight - h) < 0.5) return;
+        targetHeight = h;
+        requestLayout();
+    }
+
+    /**
+     * Jepit tinggi canvas ke ruang VBox yang BENAR-BENAR tersedia: setinggi
+     * papan kalau muat, mengecil kalau window sempit - tidak pernah memaksa
+     * minimum layout (lihat minHeight 0 di constructor).
+     */
+    @Override
+    protected void layoutChildren() {
+        super.layoutChildren();
+        double avail = getHeight() - getInsets().getTop() - getInsets().getBottom()
+                - getSpacing() - scoreLabel.prefHeight(-1);
+        double h = Math.max(80, Math.min(targetHeight, Math.max(80, avail)));
+        if (Math.abs(canvas.getHeight() - h) > 0.5) {
+            canvas.setHeight(h);
+            canvas.setWidth(BAR_WIDTH);
+            repaint();
+        }
     }
 
     /** Kembalikan ke posisi awal (seimbang). */

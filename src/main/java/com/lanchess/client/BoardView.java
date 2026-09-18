@@ -229,6 +229,38 @@ public class BoardView extends Canvas {
                 gc.strokeRect(x, y, sq, sq);
             }
         }
+        drawCoordinates(gc, sq, ox, oy);
+    }
+
+    /**
+     * Label koordinat: file (a-h) di baris display paling bawah, rank (1-8)
+     * di kolom display paling kiri. Selalu menempel ke kotak yang benar
+     * walau papan di-flip, dengan warna kontras terhadap warna kotaknya.
+     */
+    private void drawCoordinates(GraphicsContext gc, double sq, double ox, double oy) {
+        if (sq < 30) return; // terlalu kecil (preview mini) - lewati supaya tidak berdesakan
+        gc.setFont(Font.font("SansSerif", FontWeight.BOLD, Math.max(9, sq * 0.16)));
+        for (int r = 0; r < 8; r++) {
+            for (int c = 0; c < 8; c++) {
+                int dr = toDisplayRow(r);
+                int dc = toDisplayCol(c);
+                boolean light = (r + c) % 2 == 0;
+                Color label = light ? Color.web("#9A9B98") : Color.web("#F2F2F0", 0.85);
+                gc.setFill(label);
+                double x = ox + dc * sq;
+                double y = oy + dr * sq;
+                if (dr == 7) {
+                    // File a-h di sudut kanan-bawah kotak baris terbawah
+                    gc.setTextAlign(TextAlignment.RIGHT);
+                    gc.fillText(String.valueOf((char) ('a' + c)), x + sq - sq * 0.07, y + sq - sq * 0.07);
+                }
+                if (dc == 0) {
+                    // Rank 1-8 di sudut kiri-atas kotak kolom terkiri
+                    gc.setTextAlign(TextAlignment.LEFT);
+                    gc.fillText(String.valueOf(8 - r), x + sq * 0.07, y + sq * 0.22);
+                }
+            }
+        }
     }
 
     private void highlightLastMove(GraphicsContext gc, GameState state) {
@@ -248,23 +280,43 @@ public class BoardView extends Canvas {
 
     private void drawPieces(GraphicsContext gc, GameState state) {
         double sq = getSquareSize();
-        gc.setFont(Font.font("Serif", FontWeight.BOLD, sq * 0.72));
-        gc.setTextAlign(TextAlignment.CENTER);
+        double ox = offsetX();
+        double oy = offsetY();
 
         for (int r = 0; r < 8; r++) {
             for (int c = 0; c < 8; c++) {
                 Piece piece = state.getPieceAt(r, c);
                 if (piece == null) continue;
 
-                String key = piece.getColor().name() + "_" + piece.getType().name();
-                String symbol = UNICODE_SYMBOLS.get(key);
-
                 int dr = toDisplayRow(r);
                 int dc = toDisplayCol(c);
-                double x = offsetX() + dc * sq + sq / 2.0;
-                double y = offsetY() + dr * sq + sq * 0.80;
 
-                // Outline tipis supaya bidak putih tetap terbaca di kotak terang
+                javafx.scene.image.Image sprite = PieceSprites.get(piece.getColor(), piece.getType());
+                if (sprite != null) {
+                    // Sprite Cburnett: gambar nyaris memenuhi kotak dengan padding kecil.
+                    double pad = sq * 0.06;
+                    double x = ox + dc * sq + pad;
+                    double y = oy + dr * sq + pad;
+                    double size = sq - pad * 2;
+                    // Bayangan lembut supaya bidak "menempel" di papan
+                    gc.setFill(Color.rgb(0, 0, 0, 0.25));
+                    gc.fillOval(x + size * 0.12, y + size * 0.78, size * 0.76, size * 0.16);
+                    gc.drawImage(sprite, x, y, size, size);
+                    continue;
+                }
+
+                // Fallback unicode (kalau PNG tidak terbawa): glyph + bayangan + outline
+                String key = piece.getColor().name() + "_" + piece.getType().name();
+                String symbol = UNICODE_SYMBOLS.get(key);
+                double x = ox + dc * sq + sq / 2.0;
+                double y = oy + dr * sq + sq * 0.80;
+
+                gc.setFont(Font.font("Serif", FontWeight.BOLD, sq * 0.72));
+                gc.setTextAlign(TextAlignment.CENTER);
+
+                gc.setFill(Color.rgb(0, 0, 0, 0.35));
+                gc.fillText(symbol, x + sq * 0.03, y + sq * 0.03);
+
                 gc.setStroke(piece.getColor() == PlayerColor.WHITE ? Color.BLACK : Color.web("#444444"));
                 gc.setLineWidth(Math.max(1, sq * 0.016));
                 gc.strokeText(symbol, x, y);
