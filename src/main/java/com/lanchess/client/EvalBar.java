@@ -3,6 +3,7 @@ package com.lanchess.client;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.Label;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
@@ -16,18 +17,23 @@ import javafx.scene.text.TextAlignment;
  * Controller mengisi bar ini dari StockfishEngine.evaluateCentipawns() yang
  * dijalankan di background thread; method update() sendiri WAJIB dipanggil
  * dari JavaFX Application Thread (biasanya via Platform.runLater).
+ *
+ * RESPONSIF: tinggi bar mengikuti tinggi papan (lihat setBarHeight / bind ke
+ * BoardView). Setiap resize menggambar ulang dari cache terakhir.
  */
 public class EvalBar extends VBox {
 
     private static final double BAR_WIDTH = 36;
+    public static final double MIN_BAR_HEIGHT = 200.0;
 
     private final Canvas canvas;
     private final Label scoreLabel;
-    private final double barHeight;
+
+    private double lastProb = 0.5;
+    private String lastScoreText = "0.0";
 
     public EvalBar(double height) {
-        this.barHeight = height;
-        this.canvas = new Canvas(BAR_WIDTH, height);
+        this.canvas = new Canvas(BAR_WIDTH, Math.max(height, MIN_BAR_HEIGHT));
         this.scoreLabel = new Label("0.0");
         scoreLabel.getStyleClass().add("section-label");
         scoreLabel.setFont(Font.font("SansSerif", FontWeight.BOLD, 11));
@@ -37,8 +43,22 @@ public class EvalBar extends VBox {
         scoreLabel.setStyle(scoreLabel.getStyle() + "-fx-alignment: center;");
 
         setSpacing(6);
+        setFillWidth(true);
+        setMinWidth(BAR_WIDTH + 10);
+        setMaxWidth(100);
+        // Canvas jangan ikut stretch horizontal oleh VBox, tapi boleh grow vertikal via setBarHeight.
+        VBox.setVgrow(canvas, Priority.ALWAYS);
         getChildren().addAll(canvas, scoreLabel);
         reset();
+    }
+
+    /** Ikuti tinggi papan supaya bar selalu sejajar papan saat window di-resize. */
+    public void setBarHeight(double height) {
+        double h = Math.max(height, MIN_BAR_HEIGHT);
+        if (Math.abs(canvas.getHeight() - h) < 0.5) return;
+        canvas.setHeight(h);
+        canvas.setWidth(BAR_WIDTH);
+        repaint();
     }
 
     /** Kembalikan ke posisi awal (seimbang). */
@@ -51,14 +71,20 @@ public class EvalBar extends VBox {
      * @param scoreText   teks skor dari sudut pandang putih, mis. "+1.2" atau "#"
      */
     public void update(double whiteWinProb, String scoreText) {
-        double prob = Math.max(0.0, Math.min(1.0, whiteWinProb));
+        this.lastProb = Math.max(0.0, Math.min(1.0, whiteWinProb));
+        this.lastScoreText = scoreText;
+        repaint();
+    }
+
+    private void repaint() {
+        double barHeight = canvas.getHeight();
         GraphicsContext gc = canvas.getGraphicsContext2D();
         gc.clearRect(0, 0, BAR_WIDTH, barHeight);
 
         // Latar hitam penuh, lalu timpa bagian bawah setinggi peluang putih
         gc.setFill(Color.web("#3A3A3A"));
         gc.fillRect(0, 0, BAR_WIDTH, barHeight);
-        double whiteHeight = barHeight * prob;
+        double whiteHeight = barHeight * lastProb;
         gc.setFill(Color.web("#F2F2F0"));
         gc.fillRect(0, barHeight - whiteHeight, BAR_WIDTH, whiteHeight);
 
@@ -68,7 +94,7 @@ public class EvalBar extends VBox {
         gc.strokeLine(0, barHeight / 2, BAR_WIDTH, barHeight / 2);
         gc.strokeRect(0.5, 0.5, BAR_WIDTH - 1, barHeight - 1);
 
-        scoreLabel.setText(scoreText);
+        scoreLabel.setText(lastScoreText);
     }
 
     /**

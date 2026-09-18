@@ -1,6 +1,7 @@
 package com.lanchess.client;
 
 import com.lanchess.bot.BotDifficulty;
+import com.lanchess.bot.ChessEngine;
 import com.lanchess.bot.FenConverter;
 import com.lanchess.bot.StockfishEngine;
 import com.lanchess.model.DrawReason;
@@ -28,6 +29,8 @@ import javafx.scene.control.ProgressIndicator;
 import javafx.scene.input.MouseButton;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 
@@ -55,7 +58,7 @@ import java.util.concurrent.Executors;
 public class BotGameController {
 
     private final Stage stage;
-    private final StockfishEngine engine;
+    private final ChessEngine engine;
     private final BotDifficulty difficulty;
     private final TimeControl timeControl;
     private final PlayerColor myColor;
@@ -115,7 +118,7 @@ public class BotGameController {
     private Button hintButton;
     private Button undoButton;
 
-    public BotGameController(Stage stage, StockfishEngine engine, BotDifficulty difficulty,
+    public BotGameController(Stage stage, ChessEngine engine, BotDifficulty difficulty,
                              TimeControl timeControl, PlayerColor myColor, String enginePath) {
         this.stage = stage;
         this.engine = engine;
@@ -204,9 +207,34 @@ public class BotGameController {
 
         historyPanel.refresh(state.getMoveHistory());
 
-        HBox center = new HBox(16, evalBar, boardView, historyPanel);
+        // --- Layout responsif: papan mengisi ruang sisa (square, terpusat), eval & histori menempel ---
+        StackPane boardHolder = new StackPane(boardView);
+        boardHolder.setAlignment(Pos.CENTER);
+        boardHolder.setMinSize(BoardView.MIN_BOARD_SIZE, BoardView.MIN_BOARD_SIZE);
+        boardHolder.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
+        HBox.setHgrow(boardHolder, Priority.ALWAYS);
+        StackPane.setAlignment(boardView, Pos.CENTER);
+        Runnable fitBoard = () -> {
+            double s = Math.min(boardHolder.getWidth(), boardHolder.getHeight());
+            if (s >= BoardView.MIN_BOARD_SIZE) {
+                boardView.resize(s, s);
+                evalBar.setBarHeight(s);
+            }
+        };
+        boardHolder.widthProperty().addListener((o, a, b) -> fitBoard.run());
+        boardHolder.heightProperty().addListener((o, a, b) -> fitBoard.run());
+
+        historyPanel.setPrefWidth(240);
+        historyPanel.setMinWidth(190);
+        historyPanel.setMaxWidth(300);
+        VBox.setVgrow(historyPanel, Priority.ALWAYS);
+
+        HBox center = new HBox(16, evalBar, boardHolder, historyPanel);
         center.setAlignment(Pos.CENTER);
+        center.setFillHeight(true);
+        HBox.setHgrow(boardHolder, Priority.ALWAYS);
         root.setCenter(center);
+        BorderPane.setAlignment(center, Pos.CENTER);
 
         refreshStatus();
         updateActionButtons();
@@ -215,12 +243,9 @@ public class BotGameController {
         // Evaluasi posisi awal (engine masih menganggur di sini, kecuali bot jalan duluan).
         requestEvalUpdate();
 
-        Scene scene = new Scene(root);
-        Theme.apply(scene);
-        stage.setScene(scene);
-        stage.setTitle("LAN Chess Arena - vs Stockfish");
-        stage.setResizable(false);
-        stage.show();
+        UiNav.show(stage, root, "LAN Chess Arena - vs Stockfish", 800, 600, 1080, 720);
+        // UiNav mempertahankan ukuran window; papan + eval bar menyesuaikan ruang yang ada.
+        fitBoard.run();
 
         stage.setOnCloseRequest(e -> {
             dispose();
@@ -741,6 +766,7 @@ public class BotGameController {
         hintFromCol = null;
         hintToRow = null;
         hintToCol = null;
+        boardView.clearHintHighlight();
     }
 
     /** Nama kotak aljabar, mis. (6,4) -> "e2". */
@@ -857,7 +883,7 @@ public class BotGameController {
         dispose();
         statusLabel.setText("Menyiapkan permainan baru...");
         Thread startThread = new Thread(() -> {
-            StockfishEngine freshEngine = new StockfishEngine();
+            ChessEngine freshEngine = new StockfishEngine();
             try {
                 freshEngine.start(enginePath);
                 freshEngine.setElo(difficulty.getEloRating());

@@ -78,20 +78,15 @@ public class HostSetupController {
         card.setMaxWidth(260);
         card.setMinWidth(260);
 
-        HBox root = new HBox(40, Theme.smallBoardPreview(), card);
+        HBox root = new HBox(40, Theme.responsivePreview(), card);
         root.setAlignment(Pos.CENTER);
         root.setPadding(new Insets(40));
+        root.setFillHeight(true);
 
         BorderPane wrapper = new BorderPane(root);
         wrapper.getStyleClass().add("root");
 
-        Scene scene = new Scene(wrapper);
-        Theme.apply(scene);
-        stage.setScene(scene);
-        stage.setTitle("LAN Chess Arena - Setup Host");
-        stage.setResizable(false);
-        stage.sizeToScene();
-        stage.show();
+        UiNav.show(stage, wrapper, "LAN Chess Arena - Setup Host", 640, 480, 820, 560);
     }
 
     private void onStartClicked() {

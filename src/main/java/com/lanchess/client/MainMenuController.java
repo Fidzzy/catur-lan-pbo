@@ -71,13 +71,7 @@ public class MainMenuController {
         BorderPane wrapper = new BorderPane(root);
         wrapper.getStyleClass().add("root");
 
-        Scene scene = new Scene(wrapper);
-        Theme.apply(scene);
-        stage.setScene(scene);
-        stage.setTitle("LAN Chess Arena");
-        stage.setResizable(false);
-        stage.sizeToScene();
-        stage.show();
+        UiNav.show(stage, wrapper, "LAN Chess Arena", 640, 440, 820, 520);
     }
 
     /** Divider "or" dengan garis horizontal di kedua sisi, meniru pemisah antar tombol di desain Figma. */

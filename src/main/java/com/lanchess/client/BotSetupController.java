@@ -1,7 +1,7 @@
 package com.lanchess.client;
 
 import com.lanchess.bot.BotDifficulty;
-import com.lanchess.bot.StockfishEngine;
+import com.lanchess.bot.ChessEngine;
 import com.lanchess.bot.StockfishLocator;
 import com.lanchess.model.PlayerColor;
 import com.lanchess.model.TimeControl;
@@ -106,20 +106,15 @@ public class BotSetupController {
         card.setMaxWidth(270);
         card.setMinWidth(270);
 
-        HBox root = new HBox(40, Theme.smallBoardPreview(), card);
+        HBox root = new HBox(40, Theme.responsivePreview(), card);
         root.setAlignment(Pos.CENTER);
         root.setPadding(new Insets(40));
+        root.setFillHeight(true);
 
         BorderPane wrapper = new BorderPane(root);
         wrapper.getStyleClass().add("root");
 
-        Scene scene = new Scene(wrapper);
-        Theme.apply(scene);
-        stage.setScene(scene);
-        stage.setTitle("LAN Chess Arena - Setup vs Bot");
-        stage.setResizable(false);
-        stage.sizeToScene();
-        stage.show();
+        UiNav.show(stage, wrapper, "LAN Chess Arena - Setup vs Bot", 660, 520, 860, 620);
     }
 
     private void onStartClicked() {
@@ -139,7 +134,7 @@ public class BotSetupController {
     }
 
     private void startBotGame(BotDifficulty difficulty, TimeControl timeControl, PlayerColor myColor, String enginePath) {
-        StockfishEngine engine = new StockfishEngine();
+        ChessEngine engine = new com.lanchess.bot.StockfishEngine();
         try {
             engine.start(enginePath);
             engine.setElo(difficulty.getEloRating());

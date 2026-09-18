@@ -5,11 +5,12 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
 import java.util.List;
 
-/** Panel riwayat langkah (kotak kanan-atas di frame 5 desain Figma). */
+/** Panel riwayat langkah (kotak kanan-atas di frame 5 desain Figma). Responsif: ikut grow vertikal. */
 public class MoveHistoryPanel extends VBox {
 
     private final ListView<String> listView = new ListView<>();
@@ -18,8 +19,13 @@ public class MoveHistoryPanel extends VBox {
     public MoveHistoryPanel() {
         super(8);
         getStyleClass().add("info-panel");
-        setPrefWidth(220);
-        setPrefHeight(180);
+        setPrefWidth(240);
+        setMinWidth(200);
+        setMaxWidth(320);
+        setPrefHeight(200);
+        setMinHeight(120);
+        setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
+        VBox.setVgrow(this, Priority.ALWAYS);
 
         Label title = new Label("Riwayat Langkah");
         title.getStyleClass().add("section-label");
@@ -27,6 +33,9 @@ public class MoveHistoryPanel extends VBox {
         listView.setItems(items);
         listView.getStyleClass().add("history-list");
         listView.setPrefHeight(150);
+        listView.setMinHeight(80);
+        listView.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
+        VBox.setVgrow(listView, Priority.ALWAYS);
 
         getChildren().addAll(title, listView);
     }
