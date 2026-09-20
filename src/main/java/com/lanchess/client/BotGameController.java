@@ -1,6 +1,7 @@
 package com.lanchess.client;
 
 import com.lanchess.bot.BotDifficulty;
+import com.lanchess.bot.ChessEngine;
 import com.lanchess.bot.FenConverter;
 import com.lanchess.bot.StockfishEngine;
 import com.lanchess.model.DrawReason;
@@ -18,7 +19,6 @@ import javafx.animation.AnimationTimer;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
-import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
@@ -28,6 +28,7 @@ import javafx.scene.control.ProgressIndicator;
 import javafx.scene.input.MouseButton;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 
@@ -55,7 +56,7 @@ import java.util.concurrent.Executors;
 public class BotGameController {
 
     private final Stage stage;
-    private final StockfishEngine engine;
+    private final ChessEngine engine;
     private final BotDifficulty difficulty;
     private final TimeControl timeControl;
     private final PlayerColor myColor;
@@ -115,7 +116,7 @@ public class BotGameController {
     private Button hintButton;
     private Button undoButton;
 
-    public BotGameController(Stage stage, StockfishEngine engine, BotDifficulty difficulty,
+    public BotGameController(Stage stage, ChessEngine engine, BotDifficulty difficulty,
                              TimeControl timeControl, PlayerColor myColor, String enginePath) {
         this.stage = stage;
         this.engine = engine;
@@ -145,11 +146,11 @@ public class BotGameController {
 
     private void show() {
         BorderPane root = new BorderPane();
-        root.setPadding(new Insets(16));
+        root.setPadding(new Insets(8));
         root.getStyleClass().add("root");
 
         infoLabel.getStyleClass().add("title-text");
-        infoLabel.setStyle(infoLabel.getStyle() + "-fx-font-size: 16px;");
+        infoLabel.setStyle("-fx-font-size: 15px;");
         infoLabel.setText("Kamu (" + myColor + ") vs Stockfish [" + difficulty + "] (" + botColor + ")");
 
         statusLabel.getStyleClass().add("status-text");
@@ -177,19 +178,30 @@ public class BotGameController {
         undoButton.getStyleClass().add("pill-button-secondary");
         undoButton.setOnAction(e -> onUndoClicked());
 
+        Button muteButton = new Button(SoundManager.isMuted() ? "🔇" : "🔊");
+        muteButton.getStyleClass().add("pill-button-secondary");
+        muteButton.setOnAction(e -> {
+            SoundManager.setMuted(!SoundManager.isMuted());
+            muteButton.setText(SoundManager.isMuted() ? "🔇" : "🔊");
+        });
+
         HBox statusRow = new HBox(8, statusLabel, thinkingIndicator);
         statusRow.setAlignment(Pos.CENTER);
 
-        HBox actionRow = new HBox(8, resignButton, offerDrawButton, hintButton, undoButton, backButton);
+        HBox actionRow = new HBox(8, resignButton, offerDrawButton, hintButton, undoButton, muteButton, backButton);
         actionRow.setAlignment(Pos.CENTER);
 
-        VBox topBox = new VBox(6, infoLabel, clockPanel, statusRow, actionRow);
+        VBox topBox = new VBox(4, infoLabel, clockPanel, statusRow, actionRow);
         topBox.setAlignment(Pos.CENTER);
+        topBox.getStyleClass().add("info-panel");
+        topBox.setMaxWidth(700);
+        topBox.setStyle("-fx-padding: 10 20;");
+
         root.setTop(topBox);
         BorderPane.setAlignment(topBox, Pos.CENTER);
+        BorderPane.setMargin(topBox, new Insets(0, 0, 8, 0));
 
         boardView.setOnMouseClicked(event -> {
-            // Klik-kanan = buang seluruh antrean premove.
             if (event.getButton() == MouseButton.SECONDARY) {
                 premoveQueue.clear();
                 redrawBoard();
@@ -204,23 +216,33 @@ public class BotGameController {
 
         historyPanel.refresh(state.getMoveHistory());
 
-        HBox center = new HBox(16, evalBar, boardView, historyPanel);
+        // --- Layout responsif: BoardHolder memaksa papan selalu persegi & muat
+        // (aman saat maximize/fullscreen); eval bar mengikuti tinggi papan ---
+        BoardHolder boardHolder = new BoardHolder(boardView);
+        HBox.setHgrow(boardHolder, Priority.ALWAYS);
+        boardView.heightProperty().addListener((o, a, b) -> evalBar.setBarHeight(b.doubleValue()));
+
+        historyPanel.setPrefWidth(240);
+        historyPanel.setMinWidth(190);
+        historyPanel.setMaxWidth(300);
+        VBox.setVgrow(historyPanel, Priority.ALWAYS);
+
+        HBox center = new HBox(10, evalBar, boardHolder, historyPanel);
         center.setAlignment(Pos.CENTER);
+        center.setFillHeight(true);
+
+        HBox.setHgrow(boardHolder, Priority.ALWAYS);
         root.setCenter(center);
+        BorderPane.setAlignment(center, Pos.CENTER);
 
         refreshStatus();
         updateActionButtons();
         redrawBoard();
 
-        // Evaluasi posisi awal (engine masih menganggur di sini, kecuali bot jalan duluan).
         requestEvalUpdate();
 
-        Scene scene = new Scene(root);
-        Theme.apply(scene);
-        stage.setScene(scene);
-        stage.setTitle("LAN Chess Arena - vs Stockfish");
-        stage.setResizable(false);
-        stage.show();
+        UiNav.show(stage, root, "LAN Chess Arena - vs Stockfish", 800, 600, 1080, 720);
+        evalBar.setBarHeight(boardView.getHeight());
 
         stage.setOnCloseRequest(e -> {
             dispose();
@@ -270,7 +292,6 @@ public class BotGameController {
         if (gameOver) return;
         if (row < 0 || row >= 8 || col < 0 || col >= 8) return;
 
-        // Klik baru membatalkan hint yang sedang ditampilkan.
         if (hintFromRow != null) {
             clearHint();
         }
@@ -281,8 +302,6 @@ public class BotGameController {
             return;
         }
 
-        // Giliran kita: seleksi pending premove tidak relevan di sini
-        // (antrean tetap tersimpan, hanya seleksi pending yang dibersihkan).
         premoveQueue.clearSelection();
         Piece clicked = state.getPieceAt(row, col);
 
@@ -317,7 +336,6 @@ public class BotGameController {
 
         DebugLog.log("BOT-CLICK", "-> EKSEKUSI lokal: " + move);
         applyMove(move);
-        // Langkah manual membatalkan sisa antrean premove (rencana lama tak berlaku lagi).
         premoveQueue.clear();
         clearSelection();
         clearHint();
@@ -414,6 +432,9 @@ public class BotGameController {
         while (undoStack.size() > MAX_UNDO_SNAPSHOTS) {
             undoStack.removeFirst();
         }
+        // Deteksi capture SEBELUM dieksekusi (kotak tujuan terisi / en passant).
+        boolean captured = state.getPieceAt(validatedMove.getToRow(), validatedMove.getToCol()) != null
+                || validatedMove.isEnPassant();
         PlayerColor mover = state.getCurrentTurn();
         MoveValidator.executeMove(state, validatedMove);
         if (localClock != null) {
@@ -423,6 +444,24 @@ public class BotGameController {
         if (status == GameStatus.CHECKMATE || status == GameStatus.STALEMATE || status == GameStatus.DRAW) {
             gameOver = true;
             if (localClock != null) localClock.stop();
+            playEndingSound();
+        } else if (status == GameStatus.CHECK) {
+            SoundManager.playCheck();
+        } else if (captured) {
+            SoundManager.playCapture();
+        } else {
+            SoundManager.playMove();
+        }
+    }
+
+    /** Bunyi akhir game: menang/kalah dari sudut pandang pemain, seri = notifikasi netral. */
+    private void playEndingSound() {
+        if (state.getLoserColor() == null) {
+            SoundManager.playNotify();
+        } else if (state.getLoserColor() == myColor) {
+            SoundManager.playLose();
+        } else {
+            SoundManager.playWin();
         }
     }
 
@@ -438,6 +477,7 @@ public class BotGameController {
             redrawBoard();
             refreshStatus();
             updateActionButtons();
+            playEndingSound();
             showGameOverDialog();
         });
     }
@@ -451,7 +491,6 @@ public class BotGameController {
         setThinkingIndicator(true);
         updateActionButtons();
 
-        // Lewat engineExec (single-thread) supaya tidak pernah balapan dengan hint/eval/draw.
         engineExec.submit(() -> {
             String fen = FenConverter.toFen(state);
             final String uciMove;
@@ -497,9 +536,6 @@ public class BotGameController {
                 if (gameOver) {
                     showGameOverDialog();
                 } else {
-                    // Premove dulu (langsung jalan lagi = engine sibuk lagi
-                    // dan requestEvalUpdate dilewati oleh guard-nya sendiri);
-                    // kalau antrean kosong, evaluasi posisi terbaru.
                     trySubmitPremove();
                     if (premoveQueue.isEmpty()) {
                         requestEvalUpdate();
@@ -529,8 +565,6 @@ public class BotGameController {
             } catch (IllegalStateException ignored) {
             }
         }
-        // Seleksi pending premove (jika ada) ditampilkan sebagai highlight kuning biasa;
-        // entri antrean yang terkunci digambar dengan highlight biru + nomor urut.
         Integer hlRow = selectedRow;
         Integer hlCol = selectedCol;
         List<Move> hlHints = currentLegalMoves;
@@ -605,8 +639,8 @@ public class BotGameController {
         confirm.setTitle("Resign");
         confirm.setHeaderText(null);
         confirm.setContentText("Yakin mau mengundurkan diri?");
-        Optional<javafx.scene.control.ButtonType> result = confirm.showAndWait();
-        if (result.isEmpty() || result.get() != javafx.scene.control.ButtonType.OK) return;
+        Optional<ButtonType> result = confirm.showAndWait();
+        if (result.isEmpty() || result.get() != ButtonType.OK) return;
 
         gameOver = true;
         state.setLoserColor(myColor);
@@ -617,6 +651,7 @@ public class BotGameController {
         redrawBoard();
         refreshStatus();
         updateActionButtons();
+        playEndingSound();
         showGameOverDialog();
     }
 
@@ -632,7 +667,6 @@ public class BotGameController {
 
         String fen = FenConverter.toFen(state);
         PlayerColor moverAtRequest = state.getCurrentTurn();
-        // Lewat engineExec supaya berurutan dengan request engine lain.
         engineExec.submit(() -> {
             final int evalForMover;
             try {
@@ -645,8 +679,6 @@ public class BotGameController {
                 });
                 return;
             }
-            // UCI score selalu dari sudut pandang sisi yang lagi jalan di FEN -
-            // kalau yang jalan saat request BUKAN bot, harus dibalik dulu.
             int evalForBot = (moverAtRequest == botColor) ? evalForMover : -evalForMover;
             boolean botAccepts = evalForBot < 150;
 
@@ -662,6 +694,7 @@ public class BotGameController {
                     redrawBoard();
                     refreshStatus();
                     updateActionButtons();
+                    playEndingSound();
                     showGameOverDialog();
                 } else {
                     refreshStatus();
@@ -684,8 +717,6 @@ public class BotGameController {
         statusLabel.setText("Meminta saran Stockfish...");
 
         String fen = FenConverter.toFen(state);
-        // Lewat engineExec supaya berurutan; parse + validasi di FX thread
-        // supaya memakai posisi TERKINI (bukan snapshot saat request).
         engineExec.submit(() -> {
             final String uciMove;
             try {
@@ -741,6 +772,7 @@ public class BotGameController {
         hintFromCol = null;
         hintToRow = null;
         hintToCol = null;
+        boardView.clearHintHighlight();
     }
 
     /** Nama kotak aljabar, mis. (6,4) -> "e2". */
@@ -752,12 +784,6 @@ public class BotGameController {
     // Eval bar (evaluasi posisi berkala saat engine menganggur)
     // =========================================================================
 
-    /**
-     * Minta evaluasi posisi SAAT INI untuk eval bar. Dilewati kalau game
-     * over / engine sedang dipakai (bot berpikir, hint, atau eval lain
-     * jalan) - pemanggil berikutnya (setelah bot jalan / undo) akan
-     * meminta ulang dengan posisi yang lebih baru.
-     */
     private void requestEvalUpdate() {
         if (disposed || gameOver || botThinking || hintThinking || evalRunning) return;
         evalRunning = true;
@@ -806,7 +832,6 @@ public class BotGameController {
         clearSelection();
         premoveQueue.clear();
 
-        // Jam dimulai ulang dari sisa waktu hasil restore.
         if (localClock != null) localClock.stop();
         localClock = state.getTimeControl().isUnlimited()
                 ? null
@@ -819,8 +844,6 @@ public class BotGameController {
         updateActionButtons();
 
         if (state.getCurrentTurn() == botColor) {
-            // Kasus langka: history cuma 1 langkah (bot jalan duluan sebagai
-            // putih) - bot jalan ulang dari posisi awal.
             requestBotMove();
         } else {
             requestEvalUpdate();
@@ -850,14 +873,13 @@ public class BotGameController {
     /**
      * Buang controller+engine lama, jalankan engine fresh (pola sama seperti
      * BotSetupController.startBotGame), lalu buka permainan baru dengan
-     * difficulty/timer/warna yang sama. Engine fresh = tidak ada sisa
-     * request UCI lama yang bisa mengacaukan game baru.
+     * difficulty/timer/warna yang sama.
      */
     private void startRematch() {
         dispose();
         statusLabel.setText("Menyiapkan permainan baru...");
         Thread startThread = new Thread(() -> {
-            StockfishEngine freshEngine = new StockfishEngine();
+            ChessEngine freshEngine = new StockfishEngine();
             try {
                 freshEngine.start(enginePath);
                 freshEngine.setElo(difficulty.getEloRating());
@@ -886,7 +908,6 @@ public class BotGameController {
     }
 
     private void confirmAndReturnToMenu() {
-        // Game sudah selesai -> kembali biasa tanpa dihitung resign.
         if (gameOver) {
             dispose();
             engine.quit();
@@ -899,9 +920,8 @@ public class BotGameController {
         confirm.setHeaderText(null);
         confirm.setContentText("Permainan masih berlangsung. Kembali ke menu utama "
                 + "akan dihitung sebagai resign (kalah). Lanjutkan?");
-        Optional<javafx.scene.control.ButtonType> result = confirm.showAndWait();
-        if (result.isPresent() && result.get() == javafx.scene.control.ButtonType.OK) {
-            // Yang menekan dihitung resign: catat kekalahan sebelum keluar.
+        Optional<ButtonType> result = confirm.showAndWait();
+        if (result.isPresent() && result.get() == ButtonType.OK) {
             gameOver = true;
             state.setLoserColor(myColor);
             state.setStatus(GameStatus.RESIGNATION);

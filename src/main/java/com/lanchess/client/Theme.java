@@ -30,4 +30,14 @@ public final class Theme {
         preview.render(new GameState(), null, null, List.of(), null, null);
         return preview;
     }
+
+    /**
+     * Preview papan yang RESPONSIF untuk layar setup (Friend/Host/Bot):
+     * papan mengisi ruang sisa dan ikut membesar/mengecil mengikuti window
+     * (square-fit, terpusat, tidak mungkin terpotong). Pakai ini sebagai
+     * child HBox root, bukan {@link #smallBoardPreview()} yang ukurannya fix.
+     */
+    public static BoardHolder responsivePreview() {
+        return new BoardHolder(smallBoardPreview());
+    }
 }

@@ -1,8 +1,9 @@
 package com.lanchess.client;
 
+import javafx.animation.FadeTransition;
+import javafx.animation.TranslateTransition;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
-import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.layout.BorderPane;
@@ -13,17 +14,8 @@ import javafx.scene.layout.VBox;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.stage.Stage;
+import javafx.util.Duration;
 
-/**
- * Layar pertama yang dilihat pemain (frame 1 desain Figma): ilustrasi bidak
- * besar di kiri (memakai glyph unicode ♚ sebagai pengganti aset ilustrasi
- * asli, karena aset gambar tidak tersedia untuk di-embed), dan panel kartu
- * di kanan berisi dua pilihan mode utama.
- *
- * Alur selanjutnya:
- *   "Play With Friend" -> FriendModeController (frame 2: Host/Join)
- *   "Play VS Bot"       -> BotSetupController (frame 3: ELO + Timer + warna)
- */
 public class MainMenuController {
 
     private final Stage stage;
@@ -33,18 +25,21 @@ public class MainMenuController {
     }
 
     public void show() {
+        // --- Bagian Kiri: Logo / Ikon Besar ---
         Label bigKingIcon = new Label("\u265A");
-        bigKingIcon.setFont(Font.font("Serif", FontWeight.BOLD, 220));
-        bigKingIcon.setStyle("-fx-text-fill: linear-gradient(to bottom, #3a3a3a, #0a0a0a);");
+        bigKingIcon.setFont(Font.font("Serif", FontWeight.BOLD, 240));
+        // Memberikan efek gradasi dan glow pada ikon
+        bigKingIcon.setStyle("-fx-text-fill: linear-gradient(to bottom, #4A90E2, #1E1E2E); "
+                + "-fx-effect: dropshadow(three-pass-box, rgba(74,144,226,0.3), 30, 0, 0, 0);");
 
         VBox leftSide = new VBox(bigKingIcon);
         leftSide.setAlignment(Pos.CENTER);
         HBox.setHgrow(leftSide, Priority.ALWAYS);
 
-        // ---------- Panel kanan ----------
+        // --- Bagian Kanan: Panel Menu ---
         Label smallIcon = new Label("\u265A\u2659\u2659");
         smallIcon.setFont(Font.font("Serif", FontWeight.BOLD, 34));
-        smallIcon.setStyle("-fx-text-fill: #e6e6e6;");
+        smallIcon.setStyle("-fx-text-fill: #4A90E2;");
 
         Button friendButton = new Button("Play With Friend");
         friendButton.getStyleClass().add("pill-button");
@@ -58,44 +53,41 @@ public class MainMenuController {
         botButton.setMaxWidth(Double.MAX_VALUE);
         botButton.setOnAction(e -> new BotSetupController(stage).show());
 
-        VBox card = new VBox(18, smallIcon, friendButton, orDivider, botButton);
+        VBox card = new VBox(20, smallIcon, friendButton, orDivider, botButton);
         card.getStyleClass().add("card-panel");
         card.setAlignment(Pos.CENTER);
-        card.setMaxWidth(260);
-        card.setMinWidth(260);
+        card.setMaxWidth(280);
+        card.setMinWidth(280);
 
-        HBox root = new HBox(40, leftSide, card);
+        // --- Root Layout ---
+        HBox root = new HBox(50, leftSide, card);
         root.setAlignment(Pos.CENTER);
         root.setPadding(new Insets(40));
 
         BorderPane wrapper = new BorderPane(root);
         wrapper.getStyleClass().add("root");
 
-        Scene scene = new Scene(wrapper);
-        Theme.apply(scene);
-        stage.setScene(scene);
-        stage.setTitle("LAN Chess Arena");
-        stage.setResizable(false);
-        stage.sizeToScene();
-        stage.show();
+        // --- Animasi Masuk (Fade In & Slide Up) ---
+        wrapper.setOpacity(0);
+        FadeTransition fadeIn = new FadeTransition(Duration.millis(800), wrapper);
+        fadeIn.setFromValue(0);
+        fadeIn.setToValue(1);
+
+        TranslateTransition slideUp = new TranslateTransition(Duration.millis(800), card);
+        slideUp.setFromY(30);
+        slideUp.setToY(0);
+
+        fadeIn.play();
+        slideUp.play();
+
+        UiNav.show(stage, wrapper, "LAN Chess Arena", 800, 500, 900, 600);
     }
 
-    /** Divider "or" dengan garis horizontal di kedua sisi, meniru pemisah antar tombol di desain Figma. */
     static HBox orDivider() {
-        Region leftLine = new Region();
-        leftLine.setPrefHeight(1);
-        leftLine.setStyle("-fx-background-color: #555555;");
-        HBox.setHgrow(leftLine, Priority.ALWAYS);
-
-        Region rightLine = new Region();
-        rightLine.setPrefHeight(1);
-        rightLine.setStyle("-fx-background-color: #555555;");
-        HBox.setHgrow(rightLine, Priority.ALWAYS);
-
         Label or = new Label("or");
         or.getStyleClass().add("divider-text");
 
-        HBox box = new HBox(10, leftLine, or, rightLine);
+        HBox box = new HBox(or);
         box.setAlignment(Pos.CENTER);
         return box;
     }

@@ -26,7 +26,7 @@ import java.util.concurrent.TimeUnit;
  * background thread saja, bukan dari JavaFX Application Thread (supaya UI
  * tidak freeze menunggu engine berpikir).
  */
-public class StockfishEngine {
+public class StockfishEngine implements ChessEngine {
 
     private static final long STARTUP_TIMEOUT_MS = 5000;
 
@@ -44,6 +44,7 @@ public class StockfishEngine {
      * @throws IOException kalau proses gagal dijalankan ATAU engine tidak
      *                      merespons handshake dalam batas waktu
      */
+    @Override
     public void start(String enginePath) throws IOException {
         ProcessBuilder builder = new ProcessBuilder(enginePath);
         builder.redirectErrorStream(true);
@@ -62,6 +63,7 @@ public class StockfishEngine {
     }
 
     /** Set kekuatan bermain engine (dipanggil sekali setelah start(), sebelum newGame()). */
+    @Override
     public void setSkillLevel(int level) throws IOException {
         int clamped = Math.max(0, Math.min(20, level));
         sendCommand("setoption name Skill Level value " + clamped);
@@ -76,6 +78,7 @@ public class StockfishEngine {
      * merepresentasikan "level 1500 ELO" dibanding Skill Level 0-20 yang
      * abstrak. Dipakai BotSetupController sesuai desain "Select ELO".
      */
+    @Override
     public void setElo(int elo) throws IOException {
         int clamped = Math.max(1320, Math.min(3190, elo));
         sendCommand("setoption name UCI_LimitStrength value true");
@@ -85,6 +88,7 @@ public class StockfishEngine {
     }
 
     /** Reset internal engine (hash table, riwayat) - panggil di awal setiap game baru. */
+    @Override
     public void newGame() throws IOException {
         sendCommand("ucinewgame");
         sendCommand("isready");
@@ -99,6 +103,7 @@ public class StockfishEngine {
      *
      * @return notasi UCI langkah terbaik, mis. "e2e4" atau "e7e8q" (promosi)
      */
+    @Override
     public String getBestMove(String fen, int moveTimeMs) throws IOException {
         sendCommand("position fen " + fen);
         sendCommand("go movetime " + moveTimeMs);
@@ -125,6 +130,7 @@ public class StockfishEngine {
      * Skor mate dikonversi ke nilai besar (+-100000, dikurangi/ditambah
      * jarak mate) supaya tetap sebanding secara numerik dengan skor centipawn biasa.
      */
+    @Override
     public int evaluateCentipawns(String fen, int moveTimeMs) throws IOException {
         sendCommand("position fen " + fen);
         sendCommand("go movetime " + moveTimeMs);
@@ -162,6 +168,7 @@ public class StockfishEngine {
     }
 
     /** Matikan proses engine dengan rapi (quit UCI dulu, baru force-kill kalau perlu). */
+    @Override
     public void quit() {
         running = false;
         try {
@@ -183,6 +190,7 @@ public class StockfishEngine {
         }
     }
 
+    @Override
     public boolean isRunning() {
         return running && process != null && process.isAlive();
     }

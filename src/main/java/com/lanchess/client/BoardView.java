@@ -11,6 +11,7 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.scene.text.TextAlignment;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -22,13 +23,17 @@ import java.util.Map;
  *
  * Mendukung "flip" papan (giliran BLACK melihat papan dari sisi mereka
  * sendiri di bagian bawah layar) lewat parameter flipped di render().
+ *
+ * RESPONSIF: Canvas ini resizable - ukuran kotak dihitung dinamis dari
+ * {@code min(width, height) / 8} sehingga papan selalu square dan terpusat
+ * (letterbox) mengikuti ukuran window. Setiap resize otomatis menggambar
+ * ulang dari cache render terakhir, jadi controller tidak perlu kode khusus.
  */
 public class BoardView extends Canvas {
 
     public static final int DEFAULT_SQUARE_SIZE = 76;
-
-    public final int squareSize;
-    public final int boardPixels;
+    public static final double DEFAULT_BOARD_SIZE = DEFAULT_SQUARE_SIZE * 8.0;
+    public static final double MIN_BOARD_SIZE = 280.0;
 
     private static final Color LIGHT_SQUARE = Color.web("#F2F2F0");
     private static final Color DARK_SQUARE = Color.web("#DDDEDC");
@@ -50,30 +55,100 @@ public class BoardView extends Canvas {
 
     private boolean flipped = false;
 
+    // --- Cache render terakhir supaya resize bisa redraw tanpa controller ---
+    private GameState lastState;
+    private Integer lastSelectedRow;
+    private Integer lastSelectedCol;
+    private List<Move> lastLegalMoves = List.of();
+    private Integer lastCheckRow;
+    private Integer lastCheckCol;
+    private List<PremoveQueue.Entry> lastPremoveEntries = List.of();
+    private Integer lastHintFromRow;
+    private Integer lastHintFromCol;
+    private Integer lastHintToRow;
+    private Integer lastHintToCol;
+
     public BoardView() {
         this(DEFAULT_SQUARE_SIZE);
     }
 
-    /** @param squareSize ukuran piksel tiap kotak - dipakai layar setup untuk preview papan yang lebih kecil. */
+    private final double prefBoardSize;
+
+    /** @param squareSize ukuran piksel tiap kotak awal (dipakai sebagai ukuran awal, tetap bisa di-resize). */
     public BoardView(int squareSize) {
-        super(squareSize * 8, squareSize * 8);
-        this.squareSize = squareSize;
-        this.boardPixels = squareSize * 8;
+        super(squareSize * 8.0, squareSize * 8.0);
+        this.prefBoardSize = squareSize * 8.0;
+        setManaged(true);
+        // Backup: kalau ada yang setWidth/setHeight langsung, ikut redraw.
+        widthProperty().addListener((o, a, b) -> redraw());
+        heightProperty().addListener((o, a, b) -> redraw());
+    }
+
+    // --- Resizable contract: Canvas bukan Region, tapi parent (StackPane/HBox)
+    // memanggil resize() kalau isResizable() true. Kita set width/height di sini. ---
+    @Override
+    public boolean isResizable() {
+        return true;
+    }
+
+    @Override
+    public void resize(double width, double height) {
+        // Batas bawah sengaja kecil (120) supaya preview di layar setup tetap
+        // bisa mengecil; papan gameplay dibatasi holder-nya (MIN_BOARD_SIZE).
+        double w = Math.max(width, 120);
+        double h = Math.max(height, 120);
+        setWidth(w);
+        setHeight(h);
+        redraw();
+    }
+
+    /** Ukuran awal yang diminta (dipakai fallback sebelum layout jalan). */
+    public double getPrefBoardSize() {
+        return prefBoardSize;
+    }
+
+    /** Ukuran kotak dinamis = min(width, height) / 8. */
+    public double getSquareSize() {
+        double w = getWidth();
+        double h = getHeight();
+        if (w <= 0 || h <= 0) {
+            return prefBoardSize / 8.0;
+        }
+        return Math.min(w, h) / 8.0;
+    }
+
+    /** Offset X agar papan square selalu terpusat horizontal (letterbox). */
+    private double offsetX() {
+        double sq = getSquareSize();
+        return (getWidth() - sq * 8.0) / 2.0;
+    }
+
+    /** Offset Y agar papan square selalu terpusat vertikal (letterbox). */
+    private double offsetY() {
+        double sq = getSquareSize();
+        return (getHeight() - sq * 8.0) / 2.0;
     }
 
     public void setFlipped(boolean flipped) {
         this.flipped = flipped;
+        redraw();
     }
 
-    /** Konversi koordinat pixel klik mouse -> baris papan sesungguhnya (memperhitungkan flip). */
+    /** Konversi koordinat pixel klik mouse -> baris papan sesungguhnya (memperhitungkan flip + letterbox). */
     public int pixelToRow(double y) {
-        int displayRow = (int) (y / squareSize);
+        double sq = getSquareSize();
+        if (sq <= 0) return -1;
+        int displayRow = (int) ((y - offsetY()) / sq);
+        if (displayRow < 0 || displayRow > 7) return -1;
         return flipped ? 7 - displayRow : displayRow;
     }
 
-    /** Konversi koordinat pixel klik mouse -> kolom papan sesungguhnya (memperhitungkan flip). */
+    /** Konversi koordinat pixel klik mouse -> kolom papan sesungguhnya (memperhitungkan flip + letterbox). */
     public int pixelToCol(double x) {
-        int displayCol = (int) (x / squareSize);
+        double sq = getSquareSize();
+        if (sq <= 0) return -1;
+        int displayCol = (int) ((x - offsetX()) / sq);
+        if (displayCol < 0 || displayCol > 7) return -1;
         return flipped ? 7 - displayCol : displayCol;
     }
 
@@ -97,36 +172,93 @@ public class BoardView extends Canvas {
      */
     public void render(GameState state, Integer selectedRow, Integer selectedCol,
                         List<Move> legalMoves, Integer kingInCheckRow, Integer kingInCheckCol) {
+        this.lastState = state;
+        this.lastSelectedRow = selectedRow;
+        this.lastSelectedCol = selectedCol;
+        this.lastLegalMoves = legalMoves == null ? List.of() : List.copyOf(legalMoves);
+        this.lastCheckRow = kingInCheckRow;
+        this.lastCheckCol = kingInCheckCol;
+        redrawBase();
+        // Overlay premove + hint yang sudah terkunci ikut digambar ulang di atas base.
+        drawPremoveOverlay();
+        drawHintOverlay();
+    }
+
+    /** Gambar ulang penuh dari cache (dipanggil otomatis saat resize). */
+    private void redraw() {
+        if (lastState == null) return;
+        redrawBase();
+        drawPremoveOverlay();
+        drawHintOverlay();
+    }
+
+    private void redrawBase() {
+        if (lastState == null) return;
         GraphicsContext gc = getGraphicsContext2D();
-        gc.clearRect(0, 0, boardPixels, boardPixels);
+        gc.clearRect(0, 0, getWidth(), getHeight());
 
         drawSquares(gc);
-        highlightLastMove(gc, state);
-        if (kingInCheckRow != null) {
-            fillSquare(gc, kingInCheckRow, kingInCheckCol, CHECK_HIGHLIGHT);
+        highlightLastMove(gc, lastState);
+        if (lastCheckRow != null && lastCheckCol != null) {
+            fillSquare(gc, lastCheckRow, lastCheckCol, CHECK_HIGHLIGHT);
         }
-        if (selectedRow != null) {
-            fillSquare(gc, selectedRow, selectedCol, SELECTED_HIGHLIGHT);
+        if (lastSelectedRow != null && lastSelectedCol != null) {
+            fillSquare(gc, lastSelectedRow, lastSelectedCol, SELECTED_HIGHLIGHT);
         }
-        drawPieces(gc, state);
-        if (legalMoves != null) {
-            drawLegalMoveHints(gc, state, legalMoves);
+        drawPieces(gc, lastState);
+        if (lastLegalMoves != null && !lastLegalMoves.isEmpty()) {
+            drawLegalMoveHints(gc, lastState, lastLegalMoves);
         }
     }
 
     private void drawSquares(GraphicsContext gc) {
+        double sq = getSquareSize();
+        double ox = offsetX();
+        double oy = offsetY();
         for (int r = 0; r < 8; r++) {
             for (int c = 0; c < 8; c++) {
                 boolean light = (r + c) % 2 == 0;
                 gc.setFill(light ? LIGHT_SQUARE : DARK_SQUARE);
                 int dr = toDisplayRow(r);
                 int dc = toDisplayCol(c);
-                double x = dc * squareSize;
-                double y = dr * squareSize;
-                gc.fillRect(x, y, squareSize, squareSize);
+                double x = ox + dc * sq;
+                double y = oy + dr * sq;
+                gc.fillRect(x, y, sq, sq);
                 gc.setStroke(GRID_LINE);
                 gc.setLineWidth(1);
-                gc.strokeRect(x, y, squareSize, squareSize);
+                gc.strokeRect(x, y, sq, sq);
+            }
+        }
+        drawCoordinates(gc, sq, ox, oy);
+    }
+
+    /**
+     * Label koordinat: file (a-h) di baris display paling bawah, rank (1-8)
+     * di kolom display paling kiri. Selalu menempel ke kotak yang benar
+     * walau papan di-flip, dengan warna kontras terhadap warna kotaknya.
+     */
+    private void drawCoordinates(GraphicsContext gc, double sq, double ox, double oy) {
+        if (sq < 30) return; // terlalu kecil (preview mini) - lewati supaya tidak berdesakan
+        gc.setFont(Font.font("SansSerif", FontWeight.BOLD, Math.max(9, sq * 0.16)));
+        for (int r = 0; r < 8; r++) {
+            for (int c = 0; c < 8; c++) {
+                int dr = toDisplayRow(r);
+                int dc = toDisplayCol(c);
+                boolean light = (r + c) % 2 == 0;
+                Color label = light ? Color.web("#9A9B98") : Color.web("#F2F2F0", 0.85);
+                gc.setFill(label);
+                double x = ox + dc * sq;
+                double y = oy + dr * sq;
+                if (dr == 7) {
+                    // File a-h di sudut kanan-bawah kotak baris terbawah
+                    gc.setTextAlign(TextAlignment.RIGHT);
+                    gc.fillText(String.valueOf((char) ('a' + c)), x + sq - sq * 0.07, y + sq - sq * 0.07);
+                }
+                if (dc == 0) {
+                    // Rank 1-8 di sudut kiri-atas kotak kolom terkiri
+                    gc.setTextAlign(TextAlignment.LEFT);
+                    gc.fillText(String.valueOf(8 - r), x + sq * 0.07, y + sq * 0.22);
+                }
             }
         }
     }
@@ -139,32 +271,54 @@ public class BoardView extends Canvas {
     }
 
     private void fillSquare(GraphicsContext gc, int row, int col, Color color) {
+        double sq = getSquareSize();
         int dr = toDisplayRow(row);
         int dc = toDisplayCol(col);
         gc.setFill(color);
-        gc.fillRect(dc * squareSize, dr * squareSize, squareSize, squareSize);
+        gc.fillRect(offsetX() + dc * sq, offsetY() + dr * sq, sq, sq);
     }
 
     private void drawPieces(GraphicsContext gc, GameState state) {
-        gc.setFont(Font.font("Serif", FontWeight.BOLD, squareSize * 0.72));
-        gc.setTextAlign(TextAlignment.CENTER);
+        double sq = getSquareSize();
+        double ox = offsetX();
+        double oy = offsetY();
 
         for (int r = 0; r < 8; r++) {
             for (int c = 0; c < 8; c++) {
                 Piece piece = state.getPieceAt(r, c);
                 if (piece == null) continue;
 
-                String key = piece.getColor().name() + "_" + piece.getType().name();
-                String symbol = UNICODE_SYMBOLS.get(key);
-
                 int dr = toDisplayRow(r);
                 int dc = toDisplayCol(c);
-                double x = dc * squareSize + squareSize / 2.0;
-                double y = dr * squareSize + squareSize * 0.80;
 
-                // Outline tipis supaya bidak putih tetap terbaca di kotak terang
+                javafx.scene.image.Image sprite = PieceSprites.get(piece.getColor(), piece.getType());
+                if (sprite != null) {
+                    // Sprite Cburnett: gambar nyaris memenuhi kotak dengan padding kecil.
+                    double pad = sq * 0.06;
+                    double x = ox + dc * sq + pad;
+                    double y = oy + dr * sq + pad;
+                    double size = sq - pad * 2;
+                    // Bayangan lembut supaya bidak "menempel" di papan
+                    gc.setFill(Color.rgb(0, 0, 0, 0.25));
+                    gc.fillOval(x + size * 0.12, y + size * 0.78, size * 0.76, size * 0.16);
+                    gc.drawImage(sprite, x, y, size, size);
+                    continue;
+                }
+
+                // Fallback unicode (kalau PNG tidak terbawa): glyph + bayangan + outline
+                String key = piece.getColor().name() + "_" + piece.getType().name();
+                String symbol = UNICODE_SYMBOLS.get(key);
+                double x = ox + dc * sq + sq / 2.0;
+                double y = oy + dr * sq + sq * 0.80;
+
+                gc.setFont(Font.font("Serif", FontWeight.BOLD, sq * 0.72));
+                gc.setTextAlign(TextAlignment.CENTER);
+
+                gc.setFill(Color.rgb(0, 0, 0, 0.35));
+                gc.fillText(symbol, x + sq * 0.03, y + sq * 0.03);
+
                 gc.setStroke(piece.getColor() == PlayerColor.WHITE ? Color.BLACK : Color.web("#444444"));
-                gc.setLineWidth(1.2);
+                gc.setLineWidth(Math.max(1, sq * 0.016));
                 gc.strokeText(symbol, x, y);
 
                 gc.setFill(piece.getColor() == PlayerColor.WHITE ? Color.WHITE : Color.BLACK);
@@ -179,21 +333,28 @@ public class BoardView extends Canvas {
 
     /** Highlight SELURUH antrean premove + nomor urut tiap langkah. Panggil SETELAH render(). */
     public void drawPremoveHighlights(List<PremoveQueue.Entry> entries) {
-        if (entries == null || entries.isEmpty()) return;
+        this.lastPremoveEntries = entries == null ? List.of() : List.copyOf(entries);
+        drawPremoveOverlay();
+    }
+
+    private void drawPremoveOverlay() {
+        if (lastPremoveEntries == null || lastPremoveEntries.isEmpty()) return;
+        if (lastState == null) return;
+        double sq = getSquareSize();
         GraphicsContext gc = getGraphicsContext2D();
         int n = 1;
-        for (PremoveQueue.Entry e : entries) {
+        for (PremoveQueue.Entry e : lastPremoveEntries) {
             fillSquare(gc, e.fromRow(), e.fromCol(), PREMOVE_HIGHLIGHT);
             fillSquare(gc, e.toRow(), e.toCol(), PREMOVE_HIGHLIGHT);
             // Nomor urut antrean di tengah kotak tujuan
             int dr = toDisplayRow(e.toRow());
             int dc = toDisplayCol(e.toCol());
-            double cx = dc * squareSize + squareSize / 2.0;
-            double cy = dr * squareSize + squareSize / 2.0;
+            double cx = offsetX() + dc * sq + sq / 2.0;
+            double cy = offsetY() + dr * sq + sq / 2.0;
             gc.setFill(Color.web("#1D4ED8"));
-            gc.setFont(Font.font("SansSerif", FontWeight.BOLD, squareSize * 0.30));
+            gc.setFont(Font.font("SansSerif", FontWeight.BOLD, sq * 0.30));
             gc.setTextAlign(TextAlignment.CENTER);
-            gc.fillText(String.valueOf(n), cx, cy + squareSize * 0.11);
+            gc.fillText(String.valueOf(n), cx, cy + sq * 0.11);
             n++;
         }
     }
@@ -204,36 +365,70 @@ public class BoardView extends Canvas {
      * highlight premove supaya hint selalu terlihat paling atas).
      */
     public void drawHintHighlight(int fromRow, int fromCol, int toRow, int toCol) {
-        GraphicsContext gc = getGraphicsContext2D();
-        fillSquare(gc, fromRow, fromCol, HINT_FROM_HIGHLIGHT);
+        this.lastHintFromRow = fromRow;
+        this.lastHintFromCol = fromCol;
+        this.lastHintToRow = toRow;
+        this.lastHintToCol = toCol;
+        drawHintOverlay();
+    }
 
-        int dr = toDisplayRow(toRow);
-        int dc = toDisplayCol(toCol);
-        double centerX = dc * squareSize + squareSize / 2.0;
-        double centerY = dr * squareSize + squareSize / 2.0;
+    /** Hapus hint tersimpan (dipakai saat hint dibatalkan agar tidak muncul lagi setelah resize). */
+    public void clearHintHighlight() {
+        this.lastHintFromRow = null;
+        this.lastHintFromCol = null;
+        this.lastHintToRow = null;
+        this.lastHintToCol = null;
+    }
+
+    private void drawHintOverlay() {
+        if (lastHintFromRow == null || lastState == null) return;
+        double sq = getSquareSize();
+        GraphicsContext gc = getGraphicsContext2D();
+        fillSquare(gc, lastHintFromRow, lastHintFromCol, HINT_FROM_HIGHLIGHT);
+
+        int dr = toDisplayRow(lastHintToRow);
+        int dc = toDisplayCol(lastHintToCol);
+        double centerX = offsetX() + dc * sq + sq / 2.0;
+        double centerY = offsetY() + dr * sq + sq / 2.0;
         gc.setStroke(HINT_TO_RING);
-        gc.setLineWidth(5);
-        double radius = squareSize * 0.42;
+        gc.setLineWidth(Math.max(3, sq * 0.065));
+        double radius = sq * 0.42;
         gc.strokeOval(centerX - radius, centerY - radius, radius * 2, radius * 2);
     }
 
-    private void drawLegalMoveHints(GraphicsContext gc, GameState state, List<Move> legalMoves) {        for (Move move : legalMoves) {
+    private void drawLegalMoveHints(GraphicsContext gc, GameState state, List<Move> legalMoves) {
+        double sq = getSquareSize();
+        double ox = offsetX();
+        double oy = offsetY();
+        for (Move move : legalMoves) {
             int dr = toDisplayRow(move.getToRow());
             int dc = toDisplayCol(move.getToCol());
-            double centerX = dc * squareSize + squareSize / 2.0;
-            double centerY = dr * squareSize + squareSize / 2.0;
+            double centerX = ox + dc * sq + sq / 2.0;
+            double centerY = oy + dr * sq + sq / 2.0;
 
             boolean isCapture = state.getPieceAt(move.getToRow(), move.getToCol()) != null || move.isEnPassant();
             if (isCapture) {
                 gc.setStroke(LEGAL_CAPTURE_RING);
-                gc.setLineWidth(4);
-                double radius = squareSize * 0.42;
+                gc.setLineWidth(Math.max(2, sq * 0.05));
+                double radius = sq * 0.42;
                 gc.strokeOval(centerX - radius, centerY - radius, radius * 2, radius * 2);
             } else {
                 gc.setFill(LEGAL_MOVE_DOT);
-                double radius = squareSize * 0.14;
+                double radius = sq * 0.14;
                 gc.fillOval(centerX - radius, centerY - radius, radius * 2, radius * 2);
             }
         }
+    }
+
+    // --- Kompatibilitas: kode lama membaca squareSize/boardPixels sebagai field ---
+    /** @deprecated pakai {@link #getSquareSize()} yang dinamis mengikuti ukuran window. */
+    @Deprecated
+    public int getLegacySquareSize() {
+        return (int) Math.round(getSquareSize());
+    }
+
+    /** Daftar langkah legal terakhir (copy) - untuk kebutuhan debug. */
+    public List<Move> getLastLegalMoves() {
+        return new ArrayList<>(lastLegalMoves);
     }
 }

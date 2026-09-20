@@ -25,6 +25,7 @@ import javafx.scene.control.TextField;
 import javafx.scene.input.MouseButton;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 
@@ -125,13 +126,24 @@ public class GameController {
         backButton.getStyleClass().add("pill-button-secondary");
         backButton.setOnAction(e -> confirmAndReturnToMenu());
 
-        HBox actionRow = new HBox(8, resignButton, offerDrawButton, backButton);
+        Button muteButton = new Button(SoundManager.isMuted() ? "🔇" : "🔊");
+        muteButton.getStyleClass().add("pill-button-secondary");
+        muteButton.setOnAction(e -> {
+            SoundManager.setMuted(!SoundManager.isMuted());
+            muteButton.setText(SoundManager.isMuted() ? "🔇" : "🔊");
+        });
+
+        HBox actionRow = new HBox(8, resignButton, offerDrawButton, muteButton, backButton);
         actionRow.setAlignment(Pos.CENTER);
 
-        VBox topBox = new VBox(6, colorLabel, clockPanel, statusLabel, actionRow);
+        VBox topBox = new VBox(10, colorLabel, clockPanel, statusLabel, actionRow);
         topBox.setAlignment(Pos.CENTER);
+        topBox.getStyleClass().add("info-panel"); // 1. Gunakan gaya panel kaca
+        topBox.setMaxWidth(600); // 2. Batasi lebar agar tidak melar saat window di-maximize
+
         root.setTop(topBox);
         BorderPane.setAlignment(topBox, Pos.CENTER);
+        BorderPane.setMargin(topBox, new Insets(10, 0, 15, 0)); // 3. Beri jarak ke papan di bawahnya
 
         boardView.setOnMouseClicked(event -> {
             if (event.getButton() == MouseButton.SECONDARY) {
@@ -147,20 +159,33 @@ public class GameController {
 
         historyPanel.refresh(state.getMoveHistory());
 
-        VBox sidePanel = new VBox(16, historyPanel, buildChatPanel());
-        HBox center = new HBox(20, boardView, sidePanel);
+        // --- Layout responsif: BoardHolder memaksa papan selalu persegi & muat
+        // (aman saat maximize/fullscreen), panel kanan lebar fleksibel ---
+        BoardHolder boardHolder = new BoardHolder(boardView);
+        HBox.setHgrow(boardHolder, Priority.ALWAYS);
+
+        VBox chatPanel = buildChatPanel();
+        VBox sidePanel = new VBox(16, historyPanel, chatPanel);
+        sidePanel.setPrefWidth(250);
+        sidePanel.setMinWidth(210);
+        sidePanel.setMaxWidth(320);
+        sidePanel.setMaxHeight(Double.MAX_VALUE);
+        sidePanel.setFillWidth(true);
+        VBox.setVgrow(historyPanel, Priority.ALWAYS);
+        VBox.setVgrow(chatPanel, Priority.NEVER);
+
+        HBox center = new HBox(20, boardHolder, sidePanel);
         center.setAlignment(Pos.CENTER);
+        center.setFillHeight(true);
+        HBox.setHgrow(boardHolder, Priority.ALWAYS);
         root.setCenter(center);
+        BorderPane.setAlignment(center, Pos.CENTER);
 
         refreshUiState();
         redrawBoard();
 
-        Scene scene = new Scene(root);
-        Theme.apply(scene);
-        stage.setScene(scene);
-        stage.setTitle("LAN Chess Arena - " + myColor);
-        stage.setResizable(false);
-        stage.show();
+        UiNav.show(stage, root, "LAN Chess Arena - " + myColor, 800, 600, 1080, 720);
+        // UiNav mempertahankan ukuran window; BoardHolder mengatur ukuran papan saat layout.
 
         stage.setOnCloseRequest(e -> {
             if (clockTicker != null) clockTicker.stop();
@@ -204,7 +229,10 @@ public class GameController {
         chatArea.setEditable(false);
         chatArea.setWrapText(true);
         chatArea.getStyleClass().add("chat-area");
-        chatArea.setPrefSize(220, 150);
+        chatArea.setPrefSize(240, 150);
+        chatArea.setMinSize(150, 80);
+        chatArea.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
+        VBox.setVgrow(chatArea, Priority.ALWAYS);
 
         chatInput.setPromptText("Ketik pesan...");
         chatInput.getStyleClass().add("pill-field");
@@ -220,14 +248,21 @@ public class GameController {
         chatInput.setOnAction(e -> sendChat.run());
 
         HBox inputRow = new HBox(6, chatInput, sendButton);
+        inputRow.setFillHeight(true);
+        HBox.setHgrow(chatInput, Priority.ALWAYS);
         chatInput.setPrefWidth(140);
+        chatInput.setMinWidth(80);
+        chatInput.setMaxWidth(Double.MAX_VALUE);
 
         Label chatTitle = new Label("Chat");
         chatTitle.getStyleClass().add("section-label");
 
         VBox chatBox = new VBox(8, chatTitle, chatArea, inputRow);
         chatBox.getStyleClass().add("info-panel");
-        chatBox.setPrefWidth(220);
+        chatBox.setPrefWidth(250);
+        chatBox.setMinWidth(210);
+        chatBox.setMaxWidth(320);
+        chatBox.setFillWidth(true);
         return chatBox;
     }
 
@@ -417,6 +452,8 @@ public class GameController {
                 DebugLog.log("LAN-NET", "STATE_UPDATE diterima: giliran=%s status=%s".formatted(
                         newState.getCurrentTurn(), newState.getStatus()));
                 Platform.runLater(() -> {
+                    boolean moveMade = newState.getMoveHistory().size() > state.getMoveHistory().size();
+                    boolean captured = moveMade && countPieces(newState) < countPieces(state);
                     this.state = newState;
                     this.lastStateReceivedAtMillis = System.currentTimeMillis();
                     clearSelection();
@@ -424,6 +461,16 @@ public class GameController {
                     refreshUiState();
                     redrawBoard();
                     historyPanel.refresh(state.getMoveHistory());
+
+                    if (moveMade) {
+                        if (state.getStatus() == GameStatus.CHECK || state.getStatus() == GameStatus.CHECKMATE) {
+                            SoundManager.playCheck();
+                        } else if (captured) {
+                            SoundManager.playCapture();
+                        } else {
+                            SoundManager.playMove();
+                        }
+                    }
 
                     if (state.getCurrentTurn() == myColor
                             && (state.getStatus() == GameStatus.PLAYING || state.getStatus() == GameStatus.CHECK)) {
@@ -443,7 +490,10 @@ public class GameController {
             case CHAT -> {
                 String text = message.getPayloadAs(String.class);
                 String from = message.getSender();
-                Platform.runLater(() -> chatArea.appendText(from + ": " + text + "\n"));
+                Platform.runLater(() -> {
+                    chatArea.appendText(from + ": " + text + "\n");
+                    if (!myColor.name().equals(from)) SoundManager.playNotify();
+                });
             }
             case DRAW_OFFER -> Platform.runLater(this::handleIncomingDrawOffer);
             case DRAW_DECLINE -> Platform.runLater(() ->
@@ -465,6 +515,7 @@ public class GameController {
                     premoveQueue.clear();
                     refreshUiState();
                     redrawBoard();
+                    playEndingSound();
                     showGameOverDialog(finalStatus);
                 });
             }
@@ -476,6 +527,28 @@ public class GameController {
                 });
             }
             default -> { /* JOIN/ASSIGN_COLOR/DISCONNECT tidak relevan lagi di fase gameplay */ }
+        }
+    }
+
+    /** Hitung jumlah bidak di papan (untuk deteksi capture antar STATE_UPDATE). */
+    private static int countPieces(GameState s) {
+        int n = 0;
+        for (int r = 0; r < 8; r++) {
+            for (int c = 0; c < 8; c++) {
+                if (s.getPieceAt(r, c) != null) n++;
+            }
+        }
+        return n;
+    }
+
+    /** Bunyi akhir game: menang/kalah dari sudut pandang pemain, seri = notifikasi netral. */
+    private void playEndingSound() {
+        if (state.getLoserColor() == null) {
+            SoundManager.playNotify();
+        } else if (state.getLoserColor() == myColor) {
+            SoundManager.playLose();
+        } else {
+            SoundManager.playWin();
         }
     }
 
