@@ -44,7 +44,7 @@ public class MainMenuController {
         Button friendButton = new Button("Play With Friend");
         friendButton.getStyleClass().add("pill-button");
         friendButton.setMaxWidth(Double.MAX_VALUE);
-        friendButton.setOnAction(e -> new FriendModeController(stage).show());
+        friendButton.setOnAction(e -> new ModeSelectionView(stage).show());
 
         HBox orDivider = orDivider();
 

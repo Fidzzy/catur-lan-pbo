@@ -1,6 +1,8 @@
 package com.lanchess.client;
 
 import com.lanchess.model.Message;
+import com.lanchess.model.GameMode;
+import com.lanchess.model.MessageType;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
@@ -52,6 +54,30 @@ public class NetworkClient {
         listenerThread = new Thread(this::listenLoop, "NetworkClient-Listener");
         listenerThread.setDaemon(true);
         listenerThread.start();
+    }
+
+    /**
+     * Overload baru: sekaligus mengirim GameMode ke server setelah stream
+     * siap. Mode ini akan divalidasi server terhadap mode host - kalau beda,
+     * server mengirim ERROR + DISCONNECT dan koneksi ditutup.
+     *
+     * Overload lama (tanpa GameMode) tetap dipertahankan - akan dianggap
+     * CLASSIC oleh server (backward compatible).
+     */
+    public void connect(String host, int port, GameMode gameMode,
+                        Consumer<Message> onMessageReceived) throws IOException {
+        connect(host, port, onMessageReceived);
+        sendGameMode(gameMode);
+    }
+
+    /**
+     * Kirim mode permainan ke server. HARUS dipanggil tepat setelah connect()
+     * kalau ingin memakai mode non-CLASSIC. Idempotent di sisi server
+     * (SET_MODE kedua diabaikan), tapi jangan dipanggil berkali-kali.
+     */
+    public void sendGameMode(GameMode gameMode) {
+        if (gameMode == null) gameMode = GameMode.CLASSIC;
+        sendMessage(new Message(MessageType.SET_MODE, gameMode));
     }
 
     private void listenLoop() {

@@ -23,6 +23,15 @@ import java.io.Serializable;
  *   REMATCH_START : (server -> client) GameState - state fresh permainan baru, kedua client reset UI & mulai lagi
  *   ERROR         : (dua arah) String - pesan error umum
  *   DISCONNECT    : (dua arah) tidak butuh payload - pemberitahuan client keluar
+ *   SET_MODE      : (client -> server) GameMode - mode yang dipilih client (CLASSIC/QUIZ);
+ *                   server memvalidasi harus sama dengan mode yang dikonfigurasi host.
+ *   QUIZ_START    : (server -> client) Quiz - soal yang harus ditampilkan di overlay kuis.
+ *   QUIZ_ANSWER   : (client -> server) Integer - index opsi (0..3) yang dipilih client.
+ *   QUIZ_RESULT   : (server -> client) QuizResult - hasil kuis (pemenang, index benar, reward).
+ *
+ * CATATAN KOMPATIBILITAS: value baru HARUS ditambahkan di AKHIR enum. Java
+ * men-serialize enum berdasarkan ordinal - menaruh value baru di tengah akan
+ * menggeser ordinal lama dan merusak kompatibilitas client/server beda versi.
  */
 public enum MessageType implements Serializable {
     JOIN,
@@ -41,5 +50,10 @@ public enum MessageType implements Serializable {
     REMATCH_OFFER,
     REMATCH_ACCEPT,
     REMATCH_DECLINE,
-    REMATCH_START
+    REMATCH_START,
+    // ===== Value baru untuk mode QUIZ (tambahkan SELALU di akhir) =====
+    SET_MODE,
+    QUIZ_START,
+    QUIZ_ANSWER,
+    QUIZ_RESULT
 }

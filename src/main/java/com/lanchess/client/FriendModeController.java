@@ -1,4 +1,5 @@
 package com.lanchess.client;
+import com.lanchess.model.GameMode;
 
 import com.lanchess.model.GameState;
 import com.lanchess.model.Message;
@@ -33,6 +34,7 @@ import java.io.IOException;
 public class FriendModeController {
 
     private final Stage stage;
+    private final GameMode gameMode;
     private final NetworkClient networkClient = new NetworkClient();
     private PlayerColor assignedColor;
 
@@ -42,8 +44,14 @@ public class FriendModeController {
     private Label statusLabel;
     private ProgressIndicator progressIndicator;
 
+    /** Overload lama (dipakai MainMenuController sebelum Step 4): default CLASSIC. */
     public FriendModeController(Stage stage) {
+        this(stage, GameMode.CLASSIC);
+    }
+
+    public FriendModeController(Stage stage, GameMode gameMode) {
         this.stage = stage;
+        this.gameMode = (gameMode != null) ? gameMode : GameMode.CLASSIC;
     }
 
     public void show() {
@@ -65,7 +73,7 @@ public class FriendModeController {
         hostButton = new Button("Play As Host");
         hostButton.getStyleClass().add("pill-button");
         hostButton.setMaxWidth(Double.MAX_VALUE);
-        hostButton.setOnAction(e -> new HostSetupController(stage).show());
+        hostButton.setOnAction(e -> new HostSetupController(stage, gameMode).show());
 
         HBox orDivider = MainMenuController.orDivider();
 
@@ -162,7 +170,7 @@ public class FriendModeController {
 
     private void connect(String host) {
         try {
-            networkClient.connect(host, GameServer.PORT, this::onMessageReceived);
+            networkClient.connect(host, GameServer.PORT, gameMode, this::onMessageReceived);
             Platform.runLater(() -> statusLabel.setText("Terhubung! Menunggu host memulai..."));
         } catch (IOException e) {
             Platform.runLater(() -> {
@@ -173,16 +181,17 @@ public class FriendModeController {
         }
     }
 
+    private boolean gameControllerStarted = false;   // field baru
+
     private void onMessageReceived(Message message) {
         switch (message.getType()) {
             case ASSIGN_COLOR -> assignedColor = message.getPayloadAs(PlayerColor.class);
             case STATE_UPDATE -> {
                 GameState initialState = message.getPayloadAs(GameState.class);
                 Platform.runLater(() -> {
-                    if (assignedColor == null) {
-                        showAlert("Error", "Belum menerima warna dari server.");
-                        return;
-                    }
+                    if (gameControllerStarted) return;
+                    if (assignedColor == null) return;
+                    gameControllerStarted = true;
                     new GameController(stage, networkClient, assignedColor, initialState);
                 });
             }

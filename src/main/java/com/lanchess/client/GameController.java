@@ -10,6 +10,10 @@ import com.lanchess.model.PieceType;
 import com.lanchess.model.PlayerColor;
 import com.lanchess.model.pieces.Piece;
 import com.lanchess.server.MoveValidator;
+import com.lanchess.model.Quiz;
+import com.lanchess.model.QuizResult;
+import javafx.scene.layout.StackPane;
+
 import javafx.animation.AnimationTimer;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
@@ -86,6 +90,7 @@ public class GameController {
     private final TextField chatInput = new TextField();
     private final ClockPanel clockPanel = new ClockPanel();
     private final MoveHistoryPanel historyPanel = new MoveHistoryPanel();
+    private final QuizOverlay quizOverlay = new QuizOverlay();
     private AnimationTimer clockTicker;
 
     public GameController(Stage stage, NetworkClient client, PlayerColor myColor, GameState initialState) {
@@ -106,6 +111,7 @@ public class GameController {
     }
 
     private void show() {
+        System.out.println("[GameController] show() dipanggil");
         BorderPane root = new BorderPane();
         root.setPadding(new Insets(16));
         root.getStyleClass().add("root");
@@ -184,7 +190,13 @@ public class GameController {
         refreshUiState();
         redrawBoard();
 
-        UiNav.show(stage, root, "LAN Chess Arena - " + myColor, 800, 600, 1080, 720);
+        // Bungkus root dengan StackPane supaya QuizOverlay bisa mengambang
+        // di ATAS seluruh UI tanpa mengubah layout papan. Saat overlay
+        // invisible/managed=false, StackPane ini hanya berisi root saja.
+        StackPane rootStack = new StackPane(root, quizOverlay);
+        rootStack.getStyleClass().add("root");
+
+        UiNav.show(stage, rootStack, "LAN Chess Arena - " + myColor, 800, 600, 1080, 720);
         // UiNav mempertahankan ukuran window; BoardHolder mengatur ukuran papan saat layout.
 
         stage.setOnCloseRequest(e -> {
@@ -271,6 +283,7 @@ public class GameController {
     // =========================================================================
 
     private void handleSquareClick(int row, int col) {
+        if (quizOverlay.isShowing()) return;   // overlay menutupi papan, jangan proses klik
         DebugLog.log("LAN-CLICK", "klik (%d,%d) | giliran=%s saya=%s status=%s gameOver=%s selected=%s".formatted(
                 row, col, state.getCurrentTurn(), myColor, state.getStatus(), gameOver,
                 selectedRow == null ? "-" : "(" + selectedRow + "," + selectedCol + ")"));
@@ -508,6 +521,18 @@ public class GameController {
                     new GameController(stage, client, myColor, freshState);
                 });
             }
+
+            case QUIZ_START -> {
+                Quiz quiz = message.getPayloadAs(Quiz.class);
+                Platform.runLater(() -> quizOverlay.show(quiz,
+                        idx -> client.sendMessage(new Message(
+                                MessageType.QUIZ_ANSWER, idx, myColor.name()))));
+            }
+            case QUIZ_RESULT -> {
+                QuizResult result = message.getPayloadAs(QuizResult.class);
+                Platform.runLater(() -> quizOverlay.showResult(result));
+            }
+
             case END -> {
                 GameStatus finalStatus = message.getPayloadAs(GameStatus.class);
                 Platform.runLater(() -> {
@@ -526,6 +551,7 @@ public class GameController {
                     showAlert(Alert.AlertType.ERROR, "Error", errorMsg);
                 });
             }
+
             default -> { /* JOIN/ASSIGN_COLOR/DISCONNECT tidak relevan lagi di fase gameplay */ }
         }
     }
@@ -694,6 +720,7 @@ public class GameController {
     private void shutdown() {
         gameOver = true;
         if (clockTicker != null) clockTicker.stop();
+        quizOverlay.hide();   // <-- tambah, jaga-jaga kalau shutdown saat overlay masih tampil
     }
 
     private void showAlertAndReturnToMenu(String title, String content) {

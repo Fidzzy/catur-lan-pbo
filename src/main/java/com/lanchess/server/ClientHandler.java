@@ -6,6 +6,7 @@ import com.lanchess.model.Message;
 import com.lanchess.model.MessageType;
 import com.lanchess.model.Move;
 import com.lanchess.model.PlayerColor;
+import com.lanchess.model.GameMode;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -43,6 +44,8 @@ public class ClientHandler implements Runnable {
     private ObjectOutputStream out;
     private ObjectInputStream in;
     private volatile boolean connected = true;
+    /** Flag idempotency: SET_MODE hanya diproses sekali per koneksi. */
+    private boolean modeValidated = false;
 
     /**
      * Dihitung mundur sekali, TEPAT SETELAH kedua stream (in & out) selesai
@@ -94,6 +97,7 @@ public class ClientHandler implements Runnable {
 
     private void handleMessage(Message message) {
         switch (message.getType()) {
+            case SET_MODE -> handleSetMode(message);
             case MOVE -> handleMove(message);
             case CHAT -> server.broadcastChat(assignedColor.name(), message.getPayloadAs(String.class));
             case RESIGN -> handleResign();
@@ -103,15 +107,54 @@ public class ClientHandler implements Runnable {
             case REMATCH_OFFER -> handleRematchOffer();
             case REMATCH_ACCEPT -> handleRematchAccept();
             case REMATCH_DECLINE -> handleRematchDecline();
+            case QUIZ_ANSWER -> handleQuizAnswer(message);
             case DISCONNECT -> connected = false;
             default -> log("Tipe pesan tak terduga dari client: " + message.getType());
         }
     }
 
+    /**
+     * Validasi mode permainan yang dikirim client. Server otoritatif:
+     * mode diambil dari GameServer.getGameMode() (yang di-set host via
+     * configure()). Kalau mismatch, kirim ERROR lalu tutup koneksi.
+     *
+     * Idempotent - SET_MODE kedua dan seterusnya diabaikan (mencegah
+     * client nakal mengganti mode di tengah permainan).
+     */
+    private void handleSetMode(Message message) {
+        if (modeValidated) {
+            log("SET_MODE diabaikan (sudah divalidasi sebelumnya).");
+            return;
+        }
+        GameMode clientMode = message.getPayloadAs(GameMode.class);
+        if (clientMode == null) clientMode = GameMode.CLASSIC; // defensive
+        GameMode serverMode = server.getGameMode();
+
+        if (clientMode != serverMode) {
+            log("Mode mismatch: client=" + clientMode + ", server=" + serverMode + ". Memutus koneksi.");
+            sendMessage(new Message(MessageType.ERROR,
+                    "Mode permainan tidak cocok. Host memakai " + serverMode
+                            + ", kamu memilih " + clientMode + "."));
+            // Kirim DISCONNECT supaya client tahu ini bukan error biasa
+            sendMessage(new Message(MessageType.DISCONNECT, null));
+            connected = false;   // while-loop di run() akan keluar, finally -> closeConnection()
+            return;
+        }
+        modeValidated = true;
+        log("Mode dikonfirmasi: " + clientMode);
+    }
+
     private void handleMove(Message message) {
         GameState state = server.getGameState();
 
-        // Hanya boleh jalan kalau memang giliran warna ini & game masih berjalan
+        // GUARD KUIS: kalau kuis sedang aktif, tolak semua move.
+        // Ini melindungi invariant "kuis tidak mengubah giliran catur".
+        if (server.isQuizActive()) {
+            sendMessage(new Message(MessageType.MOVE_REJECTED,
+                    "Kuis sedang berlangsung. Selesaikan kuis dulu."));
+            return;
+        }
+
         if (!ACTIVE_STATUSES.contains(state.getStatus()) || state.getCurrentTurn() != assignedColor) {
             sendMessage(new Message(MessageType.MOVE_REJECTED, "Bukan giliranmu, atau permainan sudah selesai."));
             return;
@@ -131,11 +174,23 @@ public class ClientHandler implements Runnable {
 
         server.broadcastState();
 
-        // executeMove() bisa mengubah status jadi CHECKMATE/STALEMATE/DRAW (threefold
-        // repetition atau 50-move rule) - semuanya perlu broadcast END, bukan cuma checkmate.
         if (!ACTIVE_STATUSES.contains(state.getStatus())) {
             server.broadcastEnd();
+        } else {
+            // Trigger kuis setelah state ter-broadcast & game masih aktif.
+            // Kalau game over di move ini, tidak ada kuis.
+            server.maybeTriggerQuiz(assignedColor);
         }
+    }
+
+    /** Client menjawab soal kuis. Server yang menentukan valid/benar/waktu. */
+    private void handleQuizAnswer(Message message) {
+        Integer answerIndex = message.getPayloadAs(Integer.class);
+        if (answerIndex == null || answerIndex < 0 || answerIndex > 3) {
+            log("QUIZ_ANSWER tidak valid: " + answerIndex);
+            return;
+        }
+        server.submitQuizAnswer(assignedColor, answerIndex);
     }
 
     /** Pemain mengundurkan diri. Berlaku kapan saja selama game masih berjalan, tidak harus giliran sendiri. */
