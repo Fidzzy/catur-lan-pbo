@@ -25,14 +25,23 @@ public class MainMenuController {
     }
 
     public void show() {
-        // --- Bagian Kiri: Logo / Ikon Besar ---
         Label bigKingIcon = new Label("\u265A");
         bigKingIcon.setFont(Font.font("Serif", FontWeight.BOLD, 240));
-        // Memberikan efek gradasi dan glow pada ikon
         bigKingIcon.setStyle("-fx-text-fill: linear-gradient(to bottom, #4A90E2, #1E1E2E); "
                 + "-fx-effect: dropshadow(three-pass-box, rgba(74,144,226,0.3), 30, 0, 0, 0);");
 
-        VBox leftSide = new VBox(bigKingIcon);
+        // *** JUDUL LanChess ***
+        Label appTitle = new Label("LanChess");
+        appTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 56));
+        appTitle.setStyle("-fx-text-fill: #ffffff; "
+                + "-fx-effect: dropshadow(three-pass-box, rgba(74,144,226,0.6), 20, 0, 0, 0);");
+
+        Label subtitle = new Label("Play Chess Anywhere");
+        subtitle.setFont(Font.font("Segoe UI", FontWeight.NORMAL, 16));
+        subtitle.setStyle("-fx-text-fill: #8a8a9a;");
+
+        VBox leftSide = new VBox(8, appTitle, subtitle, bigKingIcon);
+        leftSide.setAlignment(Pos.CENTER);
         leftSide.setAlignment(Pos.CENTER);
         HBox.setHgrow(leftSide, Priority.ALWAYS);
 

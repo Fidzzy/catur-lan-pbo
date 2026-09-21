@@ -44,7 +44,7 @@ final class QuestionBank {
 
     private static final String DB_FILE = "quiz.db";
     private static final String EXCEL_FILE = "soal.xlsx";
-    private static final long DEFAULT_TIME_LIMIT_MS = 8000L;
+    private static final long DEFAULT_TIME_LIMIT_MS = 13000L;
 
     private QuestionBank() {
     }
