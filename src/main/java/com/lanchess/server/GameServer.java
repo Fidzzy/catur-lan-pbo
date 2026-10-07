@@ -7,12 +7,15 @@ import com.lanchess.model.Message;
 import com.lanchess.model.MessageType;
 import com.lanchess.model.PlayerColor;
 import com.lanchess.model.TimeControl;
+import com.lanchess.model.GameMode;
+import com.lanchess.model.QuizReward;
 
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+
 
 /**
  * Entry point server. Buka ServerSocket di port 5555, terima TEPAT 2 client,
@@ -35,6 +38,14 @@ public class GameServer {
     public static final int PORT = 5555;
     private static final int MAX_PLAYERS = 2;
 
+    /** Counter langkah penuh (satu full move = Putih + Hitam). Dipakai untuk trigger kuis. */
+    private int fullMoveCounter = 0;
+
+    /** Manajer kuis. Non-null hanya kalau gameMode == QUIZ. */
+    private QuizManager quizManager;
+
+    private GameClock gameClock;
+
     private final GameState gameState = new GameState();
     /**
      * CopyOnWriteArrayList (bukan ArrayList biasa): karena sendMessage() yang
@@ -53,7 +64,8 @@ public class GameServer {
     /** Warna yang di-assign ke client PERTAMA yang connect (selalu host itu sendiri, self-connect). */
     private PlayerColor hostColor = PlayerColor.WHITE;
 
-    private GameClock gameClock;
+    /** Sub-mode permainan (CLASSIC default - backward compatible). Di-set host via configure(). */
+    private GameMode gameMode = GameMode.CLASSIC;
 
     /** Warna pemain yang sedang menawarkan seri, null kalau tidak ada tawaran pending. */
     private PlayerColor pendingDrawOfferFrom;
@@ -79,9 +91,19 @@ public class GameServer {
      * setelah dipanggil, tidak diundi ulang tiap connection).
      */
     public void configure(TimeControl timeControl, PlayerColor hostColor) {
+        configure(timeControl, hostColor, GameMode.CLASSIC);
+    }
+
+    /**
+     * Versi lengkap - sekaligus menentukan GameMode room (CLASSIC/QUIZ).
+     * Dipanggil oleh HostSetupController di sisi host. Kalau gameMode null,
+     * dianggap CLASSIC (backward compatible).
+     */
+    public void configure(TimeControl timeControl, PlayerColor hostColor, GameMode gameMode) {
         gameState.setTimeControl(timeControl);
         this.hostColor = (hostColor != null) ? hostColor
                 : (Math.random() < 0.5 ? PlayerColor.WHITE : PlayerColor.BLACK);
+        this.gameMode = (gameMode != null) ? gameMode : GameMode.CLASSIC;
     }
 
     public void start(int port) {
@@ -115,10 +137,16 @@ public class GameServer {
                 }
             }
 
+
+
             if (clients.size() == MAX_PLAYERS) {
                 log("Kedua pemain sudah terhubung. Permainan dimulai! TimeControl="
-                        + gameState.getTimeControl());
+                        + gameState.getTimeControl() + ", Mode=" + gameMode);
                 gameState.setStatus(GameStatus.PLAYING);
+
+                if (gameMode == GameMode.QUIZ) {
+                    quizManager = new QuizManager(this);
+                }
 
                 if (!gameState.getTimeControl().isUnlimited()) {
                     gameClock = new GameClock(gameState, this::handleTimeout);
@@ -168,6 +196,77 @@ public class GameServer {
         if (status == GameStatus.CHECKMATE || status == GameStatus.STALEMATE || status == GameStatus.DRAW) {
             gameClock.stop();
         }
+    }
+
+    /**
+     * Dipanggil ClientHandler setelah broadcastState tiap kali ada move
+     * sukses. Counter fullMoveCounter HANYA bertambah kalau yang move BLACK
+     * (satu full move = Putih + Hitam). Trigger kuis hanya berlaku untuk
+     * gameMode QUIZ.
+     *
+     * Aturan trigger (spesifikasi):
+     *   - fullMoveCounter % 10 == 0 (10, 20, 30, ...): WAJIB munculkan kuis.
+     *   - fullMoveCounter >= 50: 50% chance.
+     *   - fullMoveCounter >= 30: 40% chance.
+     *   - fullMoveCounter >= 15: 20% chance.
+     *   - selain itu: tidak ada kuis.
+     *
+     * @param moverColor warna yang BARU SAJA selesai move (BLACK = mungkin trigger).
+     */
+    public synchronized void maybeTriggerQuiz(PlayerColor moverColor) {
+        if (gameMode != GameMode.QUIZ) return;
+        if (moverColor != PlayerColor.BLACK) return;   // kuis hanya setelah Hitam selesai
+        if (quizManager == null) return;
+        if (quizManager.isQuizActive()) return;        // jangan tumpuk kuis
+
+        fullMoveCounter++;
+        boolean guaranteed = (fullMoveCounter > 0 && fullMoveCounter % 10 == 0);
+        boolean chance = false;
+        if (!guaranteed) {
+            double p = 0.0;
+            if (fullMoveCounter >= 50) p = 0.50;
+            else if (fullMoveCounter >= 30) p = 0.40;
+            else if (fullMoveCounter >= 15) p = 0.20;
+            if (p > 0.0 && Math.random() < p) chance = true;
+        }
+
+        if (guaranteed || chance) {
+            log("Trigger kuis (fullMoveCounter=" + fullMoveCounter
+                    + ", " + (guaranteed ? "GUARANTEED" : "chance") + ")");
+            pauseClockForQuiz();
+            quizManager.startQuiz();
+        }
+    }
+
+    /** Dipanggil ClientHandler saat menerima QUIZ_ANSWER dari client. */
+    public synchronized void submitQuizAnswer(PlayerColor color, int answerIndex) {
+        if (quizManager == null) return;
+        quizManager.submitAnswer(color, answerIndex);
+    }
+
+    /** Broadcast generik ke semua client (dipakai QuizManager). */
+    public synchronized void broadcastToAll(Message message) {
+        for (ClientHandler client : clients) {
+            client.sendMessage(message);
+        }
+    }
+
+    /** Pause jam catur sebelum kuis. Placeholder - butuh GameClock.pause(). */
+    public synchronized void pauseClockForQuiz() {
+        if (gameClock != null) gameClock.pause();   // <-- perlu GameClock.java
+    }
+
+    /** Resume jam catur setelah kuis. Placeholder - butuh GameClock.resume(). */
+    public synchronized void resumeClockAfterQuiz() {
+        if (gameClock != null) gameClock.resume();  // <-- perlu GameClock.java
+    }
+
+    /** Tambah waktu ke pemain tertentu (reward TIME_BONUS kuis). */
+    public synchronized void addTimeBonus(PlayerColor color, long bonusMs) {
+        if (gameClock == null) return;
+        gameClock.addTime(color, bonusMs);          // <-- perlu GameClock.java
+        log("Time bonus +" + (bonusMs / 1000) + "s untuk " + color);
+        broadcastState();                           // update tampilan jam di kedua client
     }
 
     /** Hentikan jam catur langsung (dipanggil ClientHandler saat resign/draw-accept). */
@@ -285,6 +384,13 @@ public class GameServer {
         pendingDrawOfferFrom = null;
         if (gameClock != null) gameClock.stop();
         gameState.reset();
+
+        // reset state kuis
+        fullMoveCounter = 0;
+        if (quizManager != null) {
+            quizManager = new QuizManager(this);   // instance baru = state bersih
+        }
+
         log("Rematch dimulai! TimeControl=" + gameState.getTimeControl());
         if (!gameState.getTimeControl().isUnlimited()) {
             gameClock = new GameClock(gameState, this::handleTimeout);
@@ -303,6 +409,11 @@ public class GameServer {
         return status == GameStatus.PLAYING
                 || status == GameStatus.CHECK
                 || status == GameStatus.WAITING_FOR_PLAYER;
+    }
+
+    /** True kalau ada kuis aktif - dipakai ClientHandler sebagai guard move. */
+    public synchronized boolean isQuizActive() {
+        return quizManager != null && quizManager.isQuizActive();
     }
 
     /** Broadcast STATE_UPDATE (snapshot GameState terkini) ke SEMUA client. Observer notify. */
@@ -336,6 +447,10 @@ public class GameServer {
      *  dikirimi ERROR lagi - cukup hapus client yang putus secara diam-diam. */
     public synchronized void handleDisconnect(ClientHandler handler) {
         clients.remove(handler);
+        // Kabari QuizManager kalau disconnect terjadi di tengah kuis
+        if (quizManager != null && quizManager.isQuizActive()) {
+            quizManager.onPlayerDisconnect(handler.getAssignedColor());
+        }
         GameStatus status = gameState.getStatus();
         boolean gameStillActive = status == GameStatus.PLAYING
                 || status == GameStatus.CHECK
@@ -358,4 +473,13 @@ public class GameServer {
     private void log(String msg) {
         System.out.println("[GameServer] " + msg);
     }
+
+    /**
+     * Mode permainan yang dikonfigurasi host. Dipakai ClientHandler untuk
+     * memvalidasi SET_MODE yang dikirim client (harus sama).
+     */
+    public synchronized GameMode getGameMode() {
+        return gameMode;
+    }
 }
+

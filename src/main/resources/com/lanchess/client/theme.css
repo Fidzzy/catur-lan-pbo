@@ -56,6 +56,7 @@
     -fx-cursor: hand;
 }
 .pill-button-secondary:hover { -fx-border-color: #cccccc; -fx-text-fill: #ffffff; }
+.pill-button-secondary:disabled { -fx-opacity: 0.45; }
 
 /* ---------- Field & selector pill ---------- */
 
@@ -67,6 +68,10 @@
     -fx-font-size: 13px;
     -fx-prompt-text-fill: #6a6a6a;
 }
+.pill-field:focused {
+    -fx-background-color: #e6e6e6;
+    -fx-effect: dropshadow(three-pass-box, rgba(255,255,255,0.25), 8, 0, 0, 0);
+}
 
 .pill-choice, .pill-choice .list-cell {
     -fx-background-color: #d6d6d6;
@@ -76,6 +81,25 @@
 }
 .pill-choice { -fx-padding: 2 4; }
 .pill-choice .list-cell { -fx-padding: 8 18; -fx-background-radius: 999; }
+
+/* Popup dropdown ChoiceBox: warnanya gelap biar konsisten dengan tema */
+.pill-choice .context-menu {
+    -fx-background-color: #2b2c30;
+    -fx-background-radius: 10;
+    -fx-padding: 4;
+}
+.pill-choice .menu-item {
+    -fx-background-radius: 6;
+}
+.pill-choice .menu-item .label {
+    -fx-text-fill: #dddddd;
+}
+.pill-choice .menu-item:focused {
+    -fx-background-color: #4A90E2;
+}
+.pill-choice .menu-item:focused .label {
+    -fx-text-fill: #ffffff;
+}
 
 /* ---------- Pilihan warna (3 lingkaran: White / Random / Black) ---------- */
 
@@ -171,4 +195,87 @@
     -fx-text-fill: #dddddd;
     -fx-font-size: 12px;
     -fx-background-radius: 10;
+}
+
+/* ---------- Bingkai Papan Catur ---------- */
+/* Padding tipis biar papan tetap besar, border tetap rapi */
+.board-frame {
+    -fx-background-color: #1a1a1c;
+    -fx-background-radius: 12;
+    -fx-border-color: #3a3b3f;
+    -fx-border-radius: 12;
+    -fx-border-width: 2;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.6), 20, 0.3, 0, 10);
+    -fx-padding: 8;
+}
+
+/* ---------- Setup Screens (vs Bot / Friend) ---------- */
+
+.setup-card-title {
+    -fx-text-fill: #ffffff;
+    -fx-font-size: 19px;
+    -fx-font-weight: bold;
+}
+
+.setup-card-subtitle {
+    -fx-text-fill: #8a8a9a;
+    -fx-font-size: 11px;
+}
+
+.setup-field-label {
+    -fx-text-fill: #8a8a9a;
+    -fx-font-size: 10px;
+    -fx-font-weight: bold;
+}
+
+.setup-divider {
+    -fx-background-color: rgba(255, 255, 255, 0.08);
+    -fx-pref-height: 1;
+    -fx-max-width: 260;
+}
+
+.setup-icon {
+    -fx-text-fill: #4A90E2;
+    -fx-effect: dropshadow(three-pass-box, rgba(74,144,226,0.45), 18, 0, 0, 0);
+}
+
+/* ---------- ScrollPane transparan untuk Setup Card ---------- */
+
+.card-scroll {
+    -fx-background-color: transparent;
+    -fx-background: transparent;
+    -fx-padding: 0;
+}
+
+.card-scroll > .viewport {
+    -fx-background-color: transparent;
+}
+
+.card-scroll .scroll-bar:vertical {
+    -fx-pref-width: 4;
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+.card-scroll .scroll-bar:vertical .track {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+}
+
+.card-scroll .scroll-bar:vertical .thumb {
+    -fx-background-color: rgba(255, 255, 255, 0.15);
+    -fx-background-radius: 4;
+}
+
+.card-scroll .scroll-bar:vertical .thumb:hover {
+    -fx-background-color: rgba(255, 255, 255, 0.3);
+}
+
+.card-scroll .scroll-bar .increment-button,
+.card-scroll .scroll-bar .decrement-button,
+.card-scroll .scroll-bar .increment-arrow,
+.card-scroll .scroll-bar .decrement-arrow {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+    -fx-shape: " ";
 }

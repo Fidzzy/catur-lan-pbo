@@ -1,4 +1,5 @@
 package com.lanchess.client;
+import com.lanchess.model.GameMode;
 
 import com.lanchess.model.GameState;
 import com.lanchess.model.PlayerColor;
@@ -30,14 +31,21 @@ import java.io.IOException;
 public class HostSetupController {
 
     private final Stage stage;
+    private final GameMode gameMode;
 
     private ChoiceBox<TimeControl> timerChoice;
     private PlayerColorChoice colorChoice;
     private Button startButton;
     private Label statusLabel;
 
+    /** Overload lama: default CLASSIC. */
     public HostSetupController(Stage stage) {
+        this(stage, GameMode.CLASSIC);
+    }
+
+    public HostSetupController(Stage stage, GameMode gameMode) {
         this.stage = stage;
+        this.gameMode = (gameMode != null) ? gameMode : GameMode.CLASSIC;
     }
 
     public void show() {
@@ -61,7 +69,7 @@ public class HostSetupController {
 
         Button backButton = new Button("< Kembali");
         backButton.getStyleClass().add("pill-button-secondary");
-        backButton.setOnAction(e -> new FriendModeController(stage).show());
+        backButton.setOnAction(e -> new FriendModeController(stage, gameMode).show());
 
         statusLabel = new Label("");
         statusLabel.getStyleClass().add("status-text");
@@ -94,11 +102,11 @@ public class HostSetupController {
         statusLabel.setText("Menjalankan server...");
 
         TimeControl timeControl = timerChoice.getValue();
-        PlayerColor hostColor = colorChoice.getValue(); // null = random, diundi di GameServer.configure()
+        PlayerColor hostColor = colorChoice.getValue();
 
         Thread serverThread = new Thread(() -> {
             GameServer server = new GameServer();
-            server.configure(timeControl, hostColor);
+            server.configure(timeControl, hostColor, gameMode);   // <-- 3 arg sekarang
             server.start(GameServer.PORT);
         }, "GameServer-Thread");
         serverThread.setDaemon(true);
@@ -106,7 +114,7 @@ public class HostSetupController {
 
         Thread connectThread = new Thread(() -> {
             try {
-                Thread.sleep(300); // beri ServerSocket waktu mulai listen sebelum kita self-connect
+                Thread.sleep(300);
                 connectAsHost();
             } catch (InterruptedException ignored) {
             }
@@ -118,17 +126,19 @@ public class HostSetupController {
     private void connectAsHost() {
         NetworkClient networkClient = new NetworkClient();
         PlayerColor[] assignedColorHolder = new PlayerColor[1];
+        boolean[] gameControllerStarted = new boolean[1];
 
         try {
-            networkClient.connect("localhost", GameServer.PORT, message -> {
+            networkClient.connect("localhost", GameServer.PORT, gameMode, message -> {
                 switch (message.getType()) {
                     case ASSIGN_COLOR -> assignedColorHolder[0] = message.getPayloadAs(PlayerColor.class);
                     case STATE_UPDATE -> {
                         GameState state = message.getPayloadAs(GameState.class);
                         Platform.runLater(() -> {
-                            if (assignedColorHolder[0] != null) {
-                                new GameController(stage, networkClient, assignedColorHolder[0], state);
-                            }
+                            if (gameControllerStarted[0]) return;
+                            if (assignedColorHolder[0] == null) return;
+                            gameControllerStarted[0] = true;
+                            new GameController(stage, networkClient, assignedColorHolder[0], state);
                         });
                     }
                     default -> { /* abaikan */ }

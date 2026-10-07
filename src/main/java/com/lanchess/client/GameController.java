@@ -10,6 +10,10 @@ import com.lanchess.model.PieceType;
 import com.lanchess.model.PlayerColor;
 import com.lanchess.model.pieces.Piece;
 import com.lanchess.server.MoveValidator;
+import com.lanchess.model.Quiz;
+import com.lanchess.model.QuizResult;
+import javafx.scene.layout.StackPane;
+
 import javafx.animation.AnimationTimer;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
@@ -86,6 +90,7 @@ public class GameController {
     private final TextField chatInput = new TextField();
     private final ClockPanel clockPanel = new ClockPanel();
     private final MoveHistoryPanel historyPanel = new MoveHistoryPanel();
+    private final QuizOverlay quizOverlay = new QuizOverlay();
     private AnimationTimer clockTicker;
 
     public GameController(Stage stage, NetworkClient client, PlayerColor myColor, GameState initialState) {
@@ -106,6 +111,7 @@ public class GameController {
     }
 
     private void show() {
+        System.out.println("[GameController] show() dipanggil");
         BorderPane root = new BorderPane();
         root.setPadding(new Insets(16));
         root.getStyleClass().add("root");
@@ -136,10 +142,14 @@ public class GameController {
         HBox actionRow = new HBox(8, resignButton, offerDrawButton, muteButton, backButton);
         actionRow.setAlignment(Pos.CENTER);
 
-        VBox topBox = new VBox(6, colorLabel, clockPanel, statusLabel, actionRow);
+        VBox topBox = new VBox(10, colorLabel, clockPanel, statusLabel, actionRow);
         topBox.setAlignment(Pos.CENTER);
+        topBox.getStyleClass().add("info-panel"); // 1. Gunakan gaya panel kaca
+        topBox.setMaxWidth(600); // 2. Batasi lebar agar tidak melar saat window di-maximize
+
         root.setTop(topBox);
         BorderPane.setAlignment(topBox, Pos.CENTER);
+        BorderPane.setMargin(topBox, new Insets(10, 0, 15, 0)); // 3. Beri jarak ke papan di bawahnya
 
         boardView.setOnMouseClicked(event -> {
             if (event.getButton() == MouseButton.SECONDARY) {
@@ -267,6 +277,7 @@ public class GameController {
     // =========================================================================
 
     private void handleSquareClick(int row, int col) {
+        if (quizOverlay.isShowing()) return;   // overlay menutupi papan, jangan proses klik
         DebugLog.log("LAN-CLICK", "klik (%d,%d) | giliran=%s saya=%s status=%s gameOver=%s selected=%s".formatted(
                 row, col, state.getCurrentTurn(), myColor, state.getStatus(), gameOver,
                 selectedRow == null ? "-" : "(" + selectedRow + "," + selectedCol + ")"));
@@ -504,6 +515,18 @@ public class GameController {
                     new GameController(stage, client, myColor, freshState);
                 });
             }
+
+            case QUIZ_START -> {
+                Quiz quiz = message.getPayloadAs(Quiz.class);
+                Platform.runLater(() -> quizOverlay.show(quiz,
+                        idx -> client.sendMessage(new Message(
+                                MessageType.QUIZ_ANSWER, idx, myColor.name()))));
+            }
+            case QUIZ_RESULT -> {
+                QuizResult result = message.getPayloadAs(QuizResult.class);
+                Platform.runLater(() -> quizOverlay.showResult(result));
+            }
+
             case END -> {
                 GameStatus finalStatus = message.getPayloadAs(GameStatus.class);
                 Platform.runLater(() -> {
@@ -522,6 +545,7 @@ public class GameController {
                     showAlert(Alert.AlertType.ERROR, "Error", errorMsg);
                 });
             }
+
             default -> { /* JOIN/ASSIGN_COLOR/DISCONNECT tidak relevan lagi di fase gameplay */ }
         }
     }
@@ -690,6 +714,7 @@ public class GameController {
     private void shutdown() {
         gameOver = true;
         if (clockTicker != null) clockTicker.stop();
+        quizOverlay.hide();   // <-- tambah, jaga-jaga kalau shutdown saat overlay masih tampil
     }
 
     private void showAlertAndReturnToMenu(String title, String content) {
